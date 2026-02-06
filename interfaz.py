@@ -28,11 +28,11 @@ except ImportError:
     print("Librería 'winsound' no encontrada. No se reproducirán sonidos (solo disponible en Windows).")
     winsound = None
 
-__version__ = "1.1.9" # IMPORTANTE: Esta es la versión de tu script local
+__version__ = "1.2.0" # IMPORTANTE: Esta es la versión de tu script local
 
 # Reemplaza 'tu-usuario' y 'tu-repositorio' con los tuyos
 URL_VERSION = "https://raw.githubusercontent.com/ZombPool/P-11-Sistema-verificaci-n-de-datos/main/version.txt"
-URL_SCRIPT = "https://github.com/ZombPool/P-11-Sistema-verificaci-n-de-datos/releases/download/1.1.9/interfaz.exe"
+URL_SCRIPT = "https://github.com/ZombPool/P-11-Sistema-verificaci-n-de-datos/releases/download/1.2.0/interfaz.exe"
 # --- Dependencias Requeridas 
 # Intenta importar xlrd para archivos .xls (Geometría antigua)
 try:
@@ -2098,9 +2098,10 @@ class AnalisisMPOPage(ttk.Frame):
         file_selected = filedialog.askopenfilename(title=title, filetypes=[("Excel files", "*.xlsx *.xls")])
         if file_selected:
             var.set(file_selected)
-            match = re.search(r'JMO-(\d{9})', os.path.basename(file_selected), re.IGNORECASE)
+            # --- CORRECCIÓN: Acepta JMO o JRMO ---
+            match = re.search(r'(J(?:R)?MO-\d{9})', os.path.basename(file_selected), re.IGNORECASE)
             if match and not self.ot_var.get():
-                self.ot_var.set(match.group(1))
+                self.ot_var.set(match.group(1).upper())
 
     def select_ilrl_file(self):
         self._select_file(self.ilrl_file_var, "Seleccionar archivo de IL/RL MPO")
@@ -2339,12 +2340,12 @@ class AnalisisMPOPage(ttk.Frame):
             df = df.iloc[header_row_index + 1:].rename(columns={'pass/fail': 'result'})
             self.update_progress(30)
 
-            # --- FUNCIÓN MEJORADA PARA RECONOCER RETRABAJOS (-R1, -R2) ---
+            # --- FUNCIÓN MEJORADA PARA RECONOCER RETRABAJOS Y JRMO ---
             def parse_geo_name_mpo(name_str):
-                # Este nuevo regex ahora entiende "R" antes del número de la punta
-                match = re.match(r'(JMO\d{13})-(R?\d+)(-[FK])?', str(name_str).upper())
+                # --- CORRECCIÓN: Regex ajustada para J(R)MO ---
+                match = re.match(r'(J(?:R)?MO\d{13})-(R?\d+)(-[FK])?', str(name_str).upper())
                 if match:
-                    # Retorna: base del serial, punta (ej. "1" o "R1"), y si es fanout
+                    # Retorna: base del serial (ej. JRMO...001), punta (ej. "1" o "R1"), y si es fanout
                     return match.group(1), match.group(2), match.group(3)
                 return None, None, None
 
@@ -2437,7 +2438,7 @@ class AnalisisMPOPage(ttk.Frame):
         try:
             self.update_progress(10)
             
-            mediciones = {} # {serie: {'fecha': dt, 'estado': 'APROBADO/RECHAZADO', 'archivo': ...}}
+            mediciones = {} 
             
             for estado_carpeta, estado_resultado in [('PASS', 'APROBADO'), ('FAIL', 'RECHAZADO')]:
                 subcarpeta = os.path.join(folder_path, estado_carpeta)
@@ -2446,7 +2447,8 @@ class AnalisisMPOPage(ttk.Frame):
                 
                 for filename in os.listdir(subcarpeta):
                     if filename.lower().endswith('.xlsx') and not filename.startswith('~$'):
-                        match_serie = re.search(r'(JMO\d{13})', filename, re.IGNORECASE)
+                        # --- CORRECCIÓN: Regex ajustada para J(R)MO ---
+                        match_serie = re.search(r'(J(?:R)?MO\d{13})', filename, re.IGNORECASE)
                         match_fecha = re.search(r'(\d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2})', filename)
                         
                         if match_serie and match_fecha:
