@@ -28,11 +28,11 @@ except ImportError:
     print("Librería 'winsound' no encontrada. No se reproducirán sonidos (solo disponible en Windows).")
     winsound = None
 
-__version__ = "1.2.0" # IMPORTANTE: Esta es la versión de tu script local
+__version__ = "1.2.1" # IMPORTANTE: Esta es la versión de tu script local
 
 # Reemplaza 'tu-usuario' y 'tu-repositorio' con los tuyos
 URL_VERSION = "https://raw.githubusercontent.com/ZombPool/P-11-Sistema-verificaci-n-de-datos/main/version.txt"
-URL_SCRIPT = "https://github.com/ZombPool/P-11-Sistema-verificaci-n-de-datos/releases/download/1.2.0/interfaz.exe"
+URL_SCRIPT = "https://github.com/ZombPool/P-11-Sistema-verificaci-n-de-datos/releases/download/1.2.1/interfaz.exe"
 # --- Dependencias Requeridas 
 # Intenta importar xlrd para archivos .xls (Geometría antigua)
 try:
@@ -870,7 +870,7 @@ class App(ttk.Window):
                 ot_data['num_conectores_b'], ot_data['fibers_per_connector_b'],
                 ot_data.get('ilrl_ot_header', 'Work number'), ot_data.get('ilrl_serie_header', 'Serial number'),
                 ot_data.get('ilrl_fecha_header', 'Date'), ot_data.get('ilrl_hora_header', 'Time'),
-                ot_data.get('ilrl_estado_header', 'Alarm Status'), ot_data.get('ilrl_conector_header', 'connector label'),
+                ot_data.get('ilrl_estado_header', 'Alarm Status'), ot_data.get('ilrl_conector_header', 'conector number'),
                 datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             ))
             conn.commit()
@@ -2942,41 +2942,48 @@ class VerificacionMPO_Page(ttk.Frame):
     def open_ot_details_window(self):
         ot_input = self.ot_entry.get().strip().upper()
         if not ot_input:
-            messagebox.showwarning("Falta OT", "Por favor, ingrese un número de O.T. para ver sus detalles.", parent=self)
+            messagebox.showwarning("Falta OT", "Por favor, ingrese un número de O.T.", parent=self)
             return
-        if not ot_input.startswith('JMO-'):
-            ot_input = f"JMO-{ot_input}"
-        ot_data = self._cargar_ot_configuration(ot_input)
+            
+        # Extraer solo los números y normalizar a JMO- para buscar en la BD
+        ot_num = re.sub(r'[^0-9]', '', ot_input)
+        ot_standard = f"JMO-{ot_num}"
+            
+        ot_data = self._cargar_ot_configuration(ot_standard)
         if not ot_data:
-            messagebox.showinfo("No Encontrado", f"No se encontró ninguna configuración para la O.T.: {ot_input}", parent=self)
+            messagebox.showinfo("No Encontrado", f"No se encontró ninguna configuración para la O.T.: {ot_standard}", parent=self)
             return
         OTDetailsWindow(self, ot_data)
 
     def open_ot_config_window(self):
-        current_ot = self.ot_entry.get().strip().upper()
-        if not current_ot:
+        ot_input = self.ot_entry.get().strip().upper()
+        if not ot_input:
             messagebox.showwarning("Falta OT", "Ingrese un número de OT antes de configurar.", parent=self)
             return
-        if not current_ot.startswith("JMO-"):
-            current_ot = f"JMO-{current_ot}"
-        OTConfigWindow(self, self.app, current_ot)
+            
+        # Normalizar a JMO- para que la configuración sea compartida entre original y retrabajo
+        ot_num = re.sub(r'[^0-9]', '', ot_input)
+        ot_standard = f"JMO-{ot_num}"
+        
+        OTConfigWindow(self, self.app, ot_standard)
     
     # En la clase VerificacionMPO_Page, reemplaza este método:
 
     def verificar_cable_automatico(self, event=None):
         serie_raw = self.serie_entry.get().strip()
         
-        # --- MODIFICACIÓN: Regex ajustado para aceptar JMO o JRMO ---
-        # Explicación: J(R)?MO significa que la 'R' es opcional.
+        # Regex que acepta JMO o JRMO
         if re.match(r'J(R)?MO\d{13}', serie_raw, re.IGNORECASE):
-            # Extraemos solo los números
             numeros_serie = re.sub(r'[^0-9]', '', serie_raw)
             
             if not self.ot_entry.get().strip():
+                # Detectamos el prefijo original del escaneo
+                prefijo = "JRMO-" if "JRMO" in serie_raw.upper() else "JMO-"
                 self.ot_entry.delete(0, tk.END)
-                self.ot_entry.insert(0, f"JMO-{numeros_serie[:9]}")
+                self.ot_entry.insert(0, f"{prefijo}{numeros_serie[:9]}")
             
             self.verificar_cable()
+        # ... (resto de la función igual)
             
         elif len(serie_raw) == 13 and serie_raw.isdigit():
             if not self.ot_entry.get().strip():
@@ -2988,6 +2995,8 @@ class VerificacionMPO_Page(ttk.Frame):
 
     # En la clase VerificacionMPO_Page, reemplaza este método:
 
+    # Dentro de VerificacionMPO_Page
+
     def verificar_cable(self, event=None):
         ot_raw = self.ot_entry.get().strip().upper()
         serie_raw = self.serie_entry.get().strip()
@@ -2996,7 +3005,14 @@ class VerificacionMPO_Page(ttk.Frame):
             self.show_waiting_message()
             return
 
-        # 1. Normalización numérica
+        # Reemplaza el bloque de estandarización por este:
+        if not (ot_raw.startswith("JMO-") or ot_raw.startswith("JRMO-")):
+            ot = f"JMO-{ot_raw}"
+        else:
+            ot = ot_raw
+        # -----------------------------------------------------------
+
+        # 1. Normalización numérica del serial
         serie_numerica = re.sub(r'[^0-9]', '', serie_raw)
 
         if len(serie_numerica) != 13:
@@ -3004,9 +3020,9 @@ class VerificacionMPO_Page(ttk.Frame):
             self.show_waiting_message()
             return
 
-        # Validación de coincidencia OT
+        # Validación de coincidencia OT (Comparamos solo números)
         ot_from_serie = serie_numerica[:9]
-        ot_from_input = re.sub(r'[^0-9]', '', ot_raw)
+        ot_from_input = re.sub(r'[^0-9]', '', ot)
 
         if ot_from_serie != ot_from_input:
             messagebox.showerror(
@@ -3014,17 +3030,23 @@ class VerificacionMPO_Page(ttk.Frame):
                 "La OT del número de serie no corresponde a la OT trabajada."
             )
             return
-
-        # Estandarizamos OT
-        ot = f"JMO-{ot_raw}" if not ot_raw.startswith("JMO-") else ot_raw
         
-        # Detectar prefijo JMO o JRMO
+        # Detectar prefijo JMO o JRMO en el serial escaneado
         prefijo_serie = "JRMO-" if "JRMO" in serie_raw.upper() else "JMO-"
         serie = f"{prefijo_serie}{serie_numerica}"
 
-        ot_config = self._cargar_ot_configuration(ot)
+        # --- CAMBIO 2: Cargar configuración usando la versión JMO estandarizada ---
+        # La base de datos suele guardar la config como JMO-XXXX. 
+        # Buscamos esa versión aunque estemos trabajando una JRMO.
+        ot_config_key = f"JMO-{ot_from_input}"
+        ot_config = self._cargar_ot_configuration(ot_config_key)
+        
         if not ot_config:
-            messagebox.showwarning("Configuración Faltante", f"No se encontró configuración para la OT {ot}. Por favor, configurela primero.", parent=self)
+            # Si falla, intentamos buscar tal cual la escribió el usuario (por si acaso guardaron JRMO en BD)
+            ot_config = self._cargar_ot_configuration(ot)
+            
+        if not ot_config:
+            messagebox.showwarning("Configuración Faltante", f"No se encontró configuración para la OT {ot_from_input} (buscada como {ot_config_key}). Por favor, configurela primero.", parent=self)
             return
             
         self.result_text.config(state=tk.NORMAL)
@@ -3034,6 +3056,7 @@ class VerificacionMPO_Page(ttk.Frame):
         self.update_idletasks()
         
         # --- LÓGICA DE SWITCHES ---
+        # Pasamos a las funciones de búsqueda
         
         # 1. IL/RL
         if self.app.config.get('check_mpo_ilrl', True):
@@ -3053,13 +3076,11 @@ class VerificacionMPO_Page(ttk.Frame):
         else:
             self.last_polaridad_result = {'status': 'DESACTIVADO', 'details': 'Medición desactivada por el usuario.', 'raw_data': {}}
         
-        # Mostrar Resultados
+        # ... (El resto del método sigue igual: mostrar resultados, semáforo, sonido, log) ...
         self.mostrar_resultado_mpo("IL/RL", self.last_ilrl_result)
         self.mostrar_resultado_mpo("Geometría", self.last_geo_result)
         self.mostrar_resultado_mpo("Polaridad", self.last_polaridad_result)
         
-        # Lógica de Semáforo Final
-        # Si está desactivado, cuenta como True para no bloquear el aprobado general
         ilrl_pass = self.last_ilrl_result['status'] in ["APROBADO", "DESACTIVADO"]
         geo_pass = self.last_geo_result['status'] in ["APROBADO", "DESACTIVADO"]
         polaridad_pass = self.last_polaridad_result['status'] in ["PASS", "APROBADO", "DESACTIVADO"]
@@ -3072,16 +3093,12 @@ class VerificacionMPO_Page(ttk.Frame):
         
         if winsound:
             try:
-                if final_status == "APROBADO":
-                    winsound.Beep(1200, 200)
-                elif final_status == "RECHAZADO":
-                    winsound.Beep(400, 500)
-            except Exception as e:
-                print(f"No se pudo reproducir el sonido: {e}")
+                if final_status == "APROBADO": winsound.Beep(1200, 200)
+                elif final_status == "RECHAZADO": winsound.Beep(400, 500)
+            except Exception: pass
 
         self.result_text.config(state=tk.DISABLED)
         
-        # Guardar en log (Base de datos)
         log_data = {'serial_number': serie, 'ot_number': ot, 'overall_status': final_status,
                     'ilrl_status': self.last_ilrl_result['status'], 'ilrl_details': json.dumps(self.last_ilrl_result, default=str),
                     'geo_status': self.last_geo_result['status'], 'geo_details': json.dumps(self.last_geo_result, default=str),
@@ -3173,31 +3190,65 @@ class VerificacionMPO_Page(ttk.Frame):
     # En la clase VerificacionMPO_Page, reemplaza este método completo:
 
     def buscar_y_procesar_ilrl_mpo(self, ot, serie, config):
-        ruta_ot_ilrl = os.path.join(self.app.config['ruta_base_ilrl_mpo'], ot)
-        if not os.path.isdir(ruta_ot_ilrl): 
-            return {'status': 'NO ENCONTRADO', 'details': f'Carpeta de OT no encontrada en ILRL MPO.', 'raw_data': []}
+        base_path = self.app.config['ruta_base_ilrl_mpo']
+        ot_numerica = re.sub(r'[^0-9]', '', ot)
+        ot_num = re.sub(r'[^0-9]', '', ot)
+
+        # Busca cualquier carpeta que contenga el número de la OT
+        carpetas = [os.path.join(base_path, d) for d in os.listdir(base_path) 
+                    if ot_num in d and os.path.isdir(os.path.join(base_path, d))]
         
-        archivos_encontrados = [os.path.join(ruta_ot_ilrl, f) for f in os.listdir(ruta_ot_ilrl) if f.lower().endswith(('.xlsx', '.xls')) and not f.startswith('~$') and ot.lower() in f.lower()]
-        if not archivos_encontrados: 
-            return {'status': 'NO ENCONTRADO', 'details': f'Ningún archivo ILRL para la OT "{ot}".', 'raw_data': []}
+        if not carpetas:
+            return {'status': 'NO ENCONTRADO', 'details': f'Carpeta de OT {ot_num} no encontrada en ILRL.', 'raw_data': []}
         
-        archivo_a_procesar = max(archivos_encontrados, key=os.path.getmtime)
+        ruta_ot_ilrl = carpetas[0] # Toma la primera coincidencia
+        
+        # Intentar localizar la carpeta (JMO o JRMO)
+        posibles_carpetas = [os.path.join(base_path, f"JMO-{ot_numerica}"), os.path.join(base_path, f"JRMO-{ot_numerica}")]
+        ruta_ot_ilrl = next((p for p in posibles_carpetas if os.path.isdir(p)), None)
+
+        if not ruta_ot_ilrl:
+            return {'status': 'NO ENCONTRADO', 'details': f'Carpeta de OT {ot_numerica} no encontrada.', 'raw_data': []}
+        
+        # Buscar archivos que contengan el número de la OT
+        archivos = [os.path.join(ruta_ot_ilrl, f) for f in os.listdir(ruta_ot_ilrl) 
+                    if f.lower().endswith(('.xlsx', '.xls')) and not f.startswith('~$') and ot_numerica in f]
+        
+        if not archivos:
+            return {'status': 'NO ENCONTRADO', 'details': f'Sin archivo ILRL para OT {ot_numerica}.', 'raw_data': []}
+        
+        archivo_a_procesar = max(archivos, key=os.path.getmtime)
         
         try:
             df = pd.read_excel(archivo_a_procesar, sheet_name="Results")
-            h = {k: config.get(v, d) for k, v, d in [('serie', 'ilrl_serie_header', 'Serial number'), ('estado', 'ilrl_estado_header', 'Alarm Status'), ('conector', 'ilrl_conector_header', 'connector label'), ('fecha', 'ilrl_fecha_header', 'Date'), ('hora', 'ilrl_hora_header', 'Time')]}
+            
+            # --- MEJORA: Limpiar nombres de columnas del Excel ---
+            df.columns = [str(c).strip() for c in df.columns] 
+            
+            h = {k: config.get(v, d) for k, v, d in [
+                ('serie', 'ilrl_serie_header', 'Serial number'), 
+                ('estado', 'ilrl_estado_header', 'Alarm Status'), 
+                ('conector', 'ilrl_conector_header', 'conector number'), # Valor por defecto
+                ('fecha', 'ilrl_fecha_header', 'Date'), 
+                ('hora', 'ilrl_hora_header', 'Time')
+            ]}
 
-            if any(header not in df.columns for header in h.values()):
-                return {'status': 'ERROR', 'details': f"Faltan encabezados en {os.path.basename(archivo_a_procesar)}", 'raw_data': []}
+            # --- CORRECCIÓN CRÍTICA: Verificar qué falta exactamente ---
+            missing = [h_val for h_val in h.values() if h_val not in df.columns]
+            if missing:
+                return {
+                    'status': 'ERROR', 
+                    'details': f"Faltan encabezados en Excel: {', '.join(missing)}.\n"
+                               f"Asegúrese de configurar el nombre exacto en 'Configurar OT'.", 
+                    'raw_data': []
+                }
 
-            # --- CORRECCIÓN 1: Crear la columna base_serie ANTES de usarla ---
+            # --- Continuar con el procesamiento normal ---
             df[h['serie']] = df[h['serie']].astype(str)
             df['base_serie'] = df[h['serie']].str.extract(r'(\d{13})')
-            # -----------------------------------------------------------------
-
             serie_numerica_buscada = re.sub(r'[^0-9]', '', serie)
             
-            # Ahora sí podemos filtrar porque 'base_serie' ya existe
+            # Continuar con el resto de tu lógica original...
             df_cable_group_all = df[df['base_serie'] == serie_numerica_buscada].copy()
 
             date_series = pd.to_datetime(df[h['fecha']], dayfirst=True, errors='coerce').dt.strftime('%d/%m/%Y')
@@ -3232,7 +3283,7 @@ class VerificacionMPO_Page(ttk.Frame):
                     serie_para_reporte = full_serial 
             
             if best_sub_group_df is None:
-                return {'status': 'NO ENCONTRADO', 'details': 'No se encontraron mediciones válidas.', 'raw_data': []}
+                 return {'status': 'NO ENCONTRADO', 'details': 'No se encontraron mediciones válidas.', 'raw_data': []}
                 
             df_cable = best_sub_group_df.copy()
 
@@ -3297,8 +3348,19 @@ class VerificacionMPO_Page(ttk.Frame):
         if not os.path.isdir(ruta_base_geo): 
             return {'status': 'NO ENCONTRADO', 'details': 'Carpeta de Geometría MPO no encontrada.', 'raw_data': []}
         
-        ot_numerica = ot.replace('JMO-', '')
-        archivos_encontrados = [os.path.join(ruta_base_geo, f) for f in os.listdir(ruta_base_geo) if ot_numerica in f and f.lower().endswith(('.xlsx', '.xls')) and not f.startswith('~$')]
+        # Extraer solo números para la búsqueda
+        ot_numerica = re.sub(r'[^0-9]', '', ot)
+        archivos_encontrados = [os.path.join(ruta_base_geo, f) for f in os.listdir(ruta_base_geo) 
+                               if ot_numerica in f and f.lower().endswith(('.xlsx', '.xls'))]
+        
+        # Buscar archivos que contengan el número de la OT (encuentra JMO-2602... y JRMO-2602...)
+        archivos_encontrados = [
+            os.path.join(ruta_base_geo, f) 
+            for f in os.listdir(ruta_base_geo) 
+            if ot_numerica in f 
+            and f.lower().endswith(('.xlsx', '.xls')) 
+            and not f.startswith('~$')
+        ]
         
         if not archivos_encontrados: 
             return {'status': 'NO ENCONTRADO', 'details': f'Ningún archivo de Geometría para la OT "{ot}".', 'raw_data': []}
@@ -3403,10 +3465,36 @@ class VerificacionMPO_Page(ttk.Frame):
         
     def buscar_y_procesar_polaridad_mpo(self, ot, serie):
         ruta_base_polaridad = self.app.config['ruta_base_polaridad_mpo']
-        if not os.path.isdir(ruta_base_polaridad): return {'status': 'NO ENCONTRADO', 'details': 'Carpeta de Polaridad MPO no encontrada.', 'raw_data': {}}
+        if not os.path.isdir(ruta_base_polaridad): 
+            return {'status': 'NO ENCONTRADO', 'details': 'Carpeta de Polaridad MPO no encontrada.', 'raw_data': {}}
+        
+        ot_numeros = re.sub(r'[^0-9]', '', ot)
         serie_sin_prefijo = re.sub(r'[^0-9]', '', serie)
-        archivos_encontrados = [os.path.join(root, f) for root, _, files in os.walk(ruta_base_polaridad) for f in files if serie_sin_prefijo in f and f.lower().endswith('.xlsx') and not f.startswith('~$')]
-        if not archivos_encontrados: return {'status': 'NO ENCONTRADO', 'details': f'Ningún archivo de Polaridad para la serie "{serie}".', 'raw_data': {}}
+        
+        # Intentamos localizar la carpeta de la OT para no buscar en todo el directorio
+        rutas_posibles_ot = [
+            os.path.join(ruta_base_polaridad, f"JMO-{ot_numeros}"),
+            os.path.join(ruta_base_polaridad, f"JRMO-{ot_numeros}"),
+            ruta_base_polaridad # Fallback: buscar en la raíz si no hay carpetas por OT
+        ]
+        
+        archivos_encontrados = []
+        
+        for ruta_busqueda in rutas_posibles_ot:
+            if os.path.isdir(ruta_busqueda):
+                # Buscamos recursivamente en esta ruta
+                for root, _, files in os.walk(ruta_busqueda):
+                    for f in files:
+                        if serie_sin_prefijo in f and f.lower().endswith('.xlsx') and not f.startswith('~$'):
+                            archivos_encontrados.append(os.path.join(root, f))
+                
+                # Si encontramos archivos en la carpeta específica de la OT, dejamos de buscar en otras
+                if archivos_encontrados and ruta_busqueda != ruta_base_polaridad:
+                    break
+
+        if not archivos_encontrados: 
+            return {'status': 'NO ENCONTRADO', 'details': f'Ningún archivo de Polaridad para la serie "{serie}".', 'raw_data': {}}
+            
         archivo_a_procesar = max(archivos_encontrados, key=os.path.getmtime)
         try:
             df = pd.read_excel(archivo_a_procesar, sheet_name=0, header=None)
@@ -3431,14 +3519,6 @@ class VerificacionMPO_Page(ttk.Frame):
         DetailsWindow(self, title, data, analysis_type)
     
     # En la clase VerificacionMPO_Page, añade esta nueva función:
-
-    # En la clase VerificacionMPO_Page, reemplaza este método:
-
-    # En la clase VerificacionMPO_Page, reemplaza este método:
-
-    # En la clase VerificacionMPO_Page, reemplaza este método:
-
-    # En la clase VerificacionMPO_Page, reemplaza este método:
 
     def open_file_location(self, analysis_type):
         """Abre la carpeta que contiene el archivo de reporte."""
