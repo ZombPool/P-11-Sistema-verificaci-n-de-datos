@@ -28,11 +28,11 @@ except ImportError:
     print("Librería 'winsound' no encontrada. No se reproducirán sonidos (solo disponible en Windows).")
     winsound = None
 
-__version__ = "1.2.0" # IMPORTANTE: Esta es la versión de tu script local
+__version__ = "1.2.1" # IMPORTANTE: Esta es la versión de tu script local
 
 # Reemplaza 'tu-usuario' y 'tu-repositorio' con los tuyos
 URL_VERSION = "https://raw.githubusercontent.com/ZombPool/P-11-Sistema-verificaci-n-de-datos/main/version.txt"
-URL_SCRIPT = "https://github.com/ZombPool/P-11-Sistema-verificaci-n-de-datos/releases/download/1.2.0/interfaz.exe"
+URL_SCRIPT = "https://github.com/ZombPool/P-11-Sistema-verificaci-n-de-datos/releases/download/1.2.1/interfaz.exe"
 # --- Dependencias Requeridas 
 # Intenta importar xlrd para archivos .xls (Geometría antigua)
 try:
@@ -2942,24 +2942,36 @@ class VerificacionMPO_Page(ttk.Frame):
     def open_ot_details_window(self):
         ot_input = self.ot_entry.get().strip().upper()
         if not ot_input:
-            messagebox.showwarning("Falta OT", "Por favor, ingrese un número de O.T. para ver sus detalles.", parent=self)
+            messagebox.showwarning("Falta OT", "Por favor, ingrese un número de O.T.", parent=self)
             return
-        if not ot_input.startswith('JMO-'):
-            ot_input = f"JMO-{ot_input}"
-        ot_data = self._cargar_ot_configuration(ot_input)
+            
+        # --- NORMALIZACIÓN: Usar siempre JMO- para buscar en BD ---
+        # Extraemos solo los números (ej. 260200001)
+        ot_numeros = re.sub(r'[^0-9]', '', ot_input)
+        # Creamos la clave estándar para la base de datos
+        ot_clave_bd = f"JMO-{ot_numeros}"
+            
+        ot_data = self._cargar_ot_configuration(ot_clave_bd)
         if not ot_data:
-            messagebox.showinfo("No Encontrado", f"No se encontró ninguna configuración para la O.T.: {ot_input}", parent=self)
+            # Si no existe, intentamos buscar tal cual lo escribió el usuario por seguridad
+            ot_data = self._cargar_ot_configuration(ot_input)
+            
+        if not ot_data:
+            messagebox.showinfo("No Encontrado", f"No se encontró configuración para la O.T.: {ot_clave_bd}", parent=self)
             return
         OTDetailsWindow(self, ot_data)
 
     def open_ot_config_window(self):
-        current_ot = self.ot_entry.get().strip().upper()
-        if not current_ot:
+        ot_input = self.ot_entry.get().strip().upper()
+        if not ot_input:
             messagebox.showwarning("Falta OT", "Ingrese un número de OT antes de configurar.", parent=self)
             return
-        if not current_ot.startswith("JMO-"):
-            current_ot = f"JMO-{current_ot}"
-        OTConfigWindow(self, self.app, current_ot)
+            
+        # --- NORMALIZACIÓN: Guardar siempre como JMO- en BD ---
+        ot_numeros = re.sub(r'[^0-9]', '', ot_input)
+        ot_clave_bd = f"JMO-{ot_numeros}"
+        
+        OTConfigWindow(self, self.app, ot_clave_bd)
     
     # En la clase VerificacionMPO_Page, reemplaza este método:
 
@@ -2998,73 +3010,78 @@ class VerificacionMPO_Page(ttk.Frame):
 
         # 1. Normalización numérica
         serie_numerica = re.sub(r'[^0-9]', '', serie_raw)
+        ot_numerica_input = re.sub(r'[^0-9]', '', ot_raw)
 
         if len(serie_numerica) != 13:
-            messagebox.showerror("Formato Inválido", "El número de serie escaneado o escrito no contiene 13 dígitos.")
+            messagebox.showerror("Formato Inválido", "El número de serie debe contener 13 dígitos.")
             self.show_waiting_message()
             return
 
-        # Validación de coincidencia OT
-        ot_from_serie = serie_numerica[:9]
-        ot_from_input = re.sub(r'[^0-9]', '', ot_raw)
-
-        if ot_from_serie != ot_from_input:
-            messagebox.showerror(
-                "Error de Coincidencia",
-                "La OT del número de serie no corresponde a la OT trabajada."
-            )
+        # Validación: Los primeros 9 dígitos del serial deben coincidir con la OT
+        if ot_numerica_input != serie_numerica[:9]:
+            messagebox.showerror("Error de Coincidencia", "La OT del número de serie no corresponde a la OT trabajada.")
             return
 
-        # Estandarizamos OT
-        ot = f"JMO-{ot_raw}" if not ot_raw.startswith("JMO-") else ot_raw
+        # 2. Cargar Configuración (Usando la clave normalizada JMO-)
+        ot_clave_bd = f"JMO-{ot_numerica_input}"
+        ot_config = self._cargar_ot_configuration(ot_clave_bd)
         
-        # Detectar prefijo JMO o JRMO
-        prefijo_serie = "JRMO-" if "JRMO" in serie_raw.upper() else "JMO-"
-        serie = f"{prefijo_serie}{serie_numerica}"
-
-        ot_config = self._cargar_ot_configuration(ot)
         if not ot_config:
-            messagebox.showwarning("Configuración Faltante", f"No se encontró configuración para la OT {ot}. Por favor, configurela primero.", parent=self)
+            messagebox.showwarning("Configuración Faltante", f"No se encontró configuración para {ot_clave_bd}.\nPor favor configúrela primero.", parent=self)
             return
             
+        # 3. Preparar Interfaz
         self.result_text.config(state=tk.NORMAL)
         self.result_text.delete(1.0, tk.END)
-        self.result_text.insert(tk.END, f"Verificando cable MPO {serie} en OT {ot}...\n", "header")
+        
+        # Determinar prefijo real para mostrar (Estético y para logs)
+        # Si el usuario puso JRMO o el serial es JRMO, usamos ese. Si no, JMO.
+        if ot_raw.startswith("JRMO") or "JRMO" in serie_raw.upper():
+            ot_display = f"JRMO-{ot_numerica_input}"
+            prefijo_serie = "JRMO-"
+        else:
+            ot_display = f"JMO-{ot_numerica_input}"
+            prefijo_serie = "JMO-"
+            
+        serie_completa = f"{prefijo_serie}{serie_numerica}"
+        
+        self.result_text.insert(tk.END, f"Verificando {serie_completa} en OT {ot_display}...\n", "header")
         self.result_text.insert(tk.END, "-"*70 + "\n\n")
         self.update_idletasks()
         
-        # --- LÓGICA DE SWITCHES ---
+        # 4. Ejecutar Búsquedas
+        # IMPORTANTE: Pasamos 'ot_numerica_input' (solo números) para que la búsqueda sea agnóstica al prefijo
         
-        # 1. IL/RL
+        # IL/RL
         if self.app.config.get('check_mpo_ilrl', True):
-            self.last_ilrl_result = self.buscar_y_procesar_ilrl_mpo(ot, serie, ot_config)
+            # Enviamos solo los números para que busque carpetas JMO o JRMO indistintamente
+            self.last_ilrl_result = self.buscar_y_procesar_ilrl_mpo(ot_numerica_input, serie_completa, ot_config)
         else:
-            self.last_ilrl_result = {'status': 'DESACTIVADO', 'details': 'Medición desactivada por el usuario.', 'raw_data': []}
+            self.last_ilrl_result = {'status': 'DESACTIVADO', 'details': 'Desactivado por usuario.', 'raw_data': []}
 
-        # 2. Geometría
+        # Geometría
         if self.app.config.get('check_mpo_geo', True):
-            self.last_geo_result = self.buscar_y_procesar_geo_mpo(ot, serie, ot_config)
+            self.last_geo_result = self.buscar_y_procesar_geo_mpo(ot_numerica_input, serie_completa, ot_config)
         else:
-            self.last_geo_result = {'status': 'DESACTIVADO', 'details': 'Medición desactivada por el usuario.', 'raw_data': []}
+            self.last_geo_result = {'status': 'DESACTIVADO', 'details': 'Desactivado por usuario.', 'raw_data': []}
 
-        # 3. Polaridad
+        # Polaridad
         if self.app.config.get('check_mpo_polaridad', True):
-            self.last_polaridad_result = self.buscar_y_procesar_polaridad_mpo(ot, serie)
+            self.last_polaridad_result = self.buscar_y_procesar_polaridad_mpo(ot_numerica_input, serie_completa)
         else:
-            self.last_polaridad_result = {'status': 'DESACTIVADO', 'details': 'Medición desactivada por el usuario.', 'raw_data': {}}
+            self.last_polaridad_result = {'status': 'DESACTIVADO', 'details': 'Desactivado por usuario.', 'raw_data': {}}
         
         # Mostrar Resultados
         self.mostrar_resultado_mpo("IL/RL", self.last_ilrl_result)
         self.mostrar_resultado_mpo("Geometría", self.last_geo_result)
         self.mostrar_resultado_mpo("Polaridad", self.last_polaridad_result)
         
-        # Lógica de Semáforo Final
-        # Si está desactivado, cuenta como True para no bloquear el aprobado general
-        ilrl_pass = self.last_ilrl_result['status'] in ["APROBADO", "DESACTIVADO"]
-        geo_pass = self.last_geo_result['status'] in ["APROBADO", "DESACTIVADO"]
-        polaridad_pass = self.last_polaridad_result['status'] in ["PASS", "APROBADO", "DESACTIVADO"]
+        # Semáforo Final
+        ilrl_ok = self.last_ilrl_result['status'] in ["APROBADO", "DESACTIVADO"]
+        geo_ok = self.last_geo_result['status'] in ["APROBADO", "DESACTIVADO"]
+        pol_ok = self.last_polaridad_result['status'] in ["PASS", "APROBADO", "DESACTIVADO"]
         
-        final_status = "APROBADO" if ilrl_pass and geo_pass and polaridad_pass else "RECHAZADO"
+        final_status = "APROBADO" if ilrl_ok and geo_ok and pol_ok else "RECHAZADO"
         
         self.result_text.insert(tk.END, "\n" + "-"*70 + "\n")
         self.result_text.insert(tk.END, "ESTADO FINAL: ", ("bold", "final_status_large"))
@@ -3072,17 +3089,14 @@ class VerificacionMPO_Page(ttk.Frame):
         
         if winsound:
             try:
-                if final_status == "APROBADO":
-                    winsound.Beep(1200, 200)
-                elif final_status == "RECHAZADO":
-                    winsound.Beep(400, 500)
-            except Exception as e:
-                print(f"No se pudo reproducir el sonido: {e}")
+                if final_status == "APROBADO": winsound.Beep(1200, 200)
+                elif final_status == "RECHAZADO": winsound.Beep(400, 500)
+            except: pass
 
         self.result_text.config(state=tk.DISABLED)
         
-        # Guardar en log (Base de datos)
-        log_data = {'serial_number': serie, 'ot_number': ot, 'overall_status': final_status,
+        # Log (Guardamos la OT display para que se vea si fue retrabajo)
+        log_data = {'serial_number': serie_completa, 'ot_number': ot_display, 'overall_status': final_status,
                     'ilrl_status': self.last_ilrl_result['status'], 'ilrl_details': json.dumps(self.last_ilrl_result, default=str),
                     'geo_status': self.last_geo_result['status'], 'geo_details': json.dumps(self.last_geo_result, default=str),
                     'polaridad_status': self.last_polaridad_result['status'], 'polaridad_details': json.dumps(self.last_polaridad_result, default=str)}
@@ -3168,56 +3182,77 @@ class VerificacionMPO_Page(ttk.Frame):
 
     # En la clase VerificacionMPO_Page, reemplaza este método completo:
 
-    # En la clase VerificacionMPO_Page, reemplaza este método completo:
-
-    # En la clase VerificacionMPO_Page, reemplaza este método completo:
-
-    def buscar_y_procesar_ilrl_mpo(self, ot, serie, config):
-        ruta_ot_ilrl = os.path.join(self.app.config['ruta_base_ilrl_mpo'], ot)
-        if not os.path.isdir(ruta_ot_ilrl): 
-            return {'status': 'NO ENCONTRADO', 'details': f'Carpeta de OT no encontrada en ILRL MPO.', 'raw_data': []}
+    def buscar_y_procesar_ilrl_mpo(self, ot_num, serie, config):
+        base_path = self.app.config['ruta_base_ilrl_mpo']
         
-        archivos_encontrados = [os.path.join(ruta_ot_ilrl, f) for f in os.listdir(ruta_ot_ilrl) if f.lower().endswith(('.xlsx', '.xls')) and not f.startswith('~$') and ot.lower() in f.lower()]
-        if not archivos_encontrados: 
-            return {'status': 'NO ENCONTRADO', 'details': f'Ningún archivo ILRL para la OT "{ot}".', 'raw_data': []}
+        # 1. BÚSQUEDA DE CARPETA (Agnóstica a JMO/JRMO)
+        # Buscamos cualquier carpeta que contenga el número de la OT (ej: 260200001)
+        carpetas_candidatas = [os.path.join(base_path, d) for d in os.listdir(base_path) 
+                               if str(ot_num) in d and os.path.isdir(os.path.join(base_path, d))]
         
-        archivo_a_procesar = max(archivos_encontrados, key=os.path.getmtime)
+        if not carpetas_candidatas:
+            return {'status': 'NO ENCONTRADO', 'details': f'Carpeta de OT {ot_num} no encontrada en ILRL.', 'raw_data': []}
         
+        # Si hay más de una (raro), tomamos la modificada más recientemente
+        ruta_ot_ilrl = max(carpetas_candidatas, key=os.path.getmtime)
+        
+        # 2. BÚSQUEDA DE ARCHIVO (Agnóstica)
+        # Buscamos archivos Excel que contengan el número de la OT
+        archivos = [os.path.join(ruta_ot_ilrl, f) for f in os.listdir(ruta_ot_ilrl) 
+                    if f.lower().endswith(('.xlsx', '.xls')) and not f.startswith('~$') and str(ot_num) in f]
+        
+        if not archivos:
+            return {'status': 'NO ENCONTRADO', 'details': f'Archivo .xlsx no encontrado en {os.path.basename(ruta_ot_ilrl)}', 'raw_data': []}
+            
+        archivo_a_procesar = max(archivos, key=os.path.getmtime)
+        
+        # 3. LECTURA Y PROCESAMIENTO
         try:
             df = pd.read_excel(archivo_a_procesar, sheet_name="Results")
-            h = {k: config.get(v, d) for k, v, d in [('serie', 'ilrl_serie_header', 'Serial number'), ('estado', 'ilrl_estado_header', 'Alarm Status'), ('conector', 'ilrl_conector_header', 'connector label'), ('fecha', 'ilrl_fecha_header', 'Date'), ('hora', 'ilrl_hora_header', 'Time')]}
+            
+            # --- LIMPIEZA DE COLUMNAS (CRÍTICO) ---
+            # Esto elimina espacios al inicio/final de los nombres de columnas
+            # Así "conector number " será igual a "conector number"
+            df.columns = [str(c).strip() for c in df.columns]
+            
+            # Mapeo de encabezados desde la configuración
+            h = {k: config.get(v, d) for k, v, d in [
+                ('serie', 'ilrl_serie_header', 'Serial number'), 
+                ('estado', 'ilrl_estado_header', 'Alarm Status'), 
+                ('conector', 'ilrl_conector_header', 'connector label'), 
+                ('fecha', 'ilrl_fecha_header', 'Date'), 
+                ('hora', 'ilrl_hora_header', 'Time')
+            ]}
+            
+            # Validación de existencia de encabezados
+            missing = [h_val for h_val in h.values() if h_val not in df.columns]
+            if missing:
+                return {'status': 'ERROR', 'details': f"Faltan encabezados en Excel: {', '.join(missing)}. Revise Configuración.", 'raw_data': []}
 
-            if any(header not in df.columns for header in h.values()):
-                return {'status': 'ERROR', 'details': f"Faltan encabezados en {os.path.basename(archivo_a_procesar)}", 'raw_data': []}
-
-            # --- CORRECCIÓN 1: Crear la columna base_serie ANTES de usarla ---
+            # Preparación de datos
             df[h['serie']] = df[h['serie']].astype(str)
             df['base_serie'] = df[h['serie']].str.extract(r'(\d{13})')
-            # -----------------------------------------------------------------
-
+            
+            # Filtramos por el serial numérico buscado
             serie_numerica_buscada = re.sub(r'[^0-9]', '', serie)
-            
-            # Ahora sí podemos filtrar porque 'base_serie' ya existe
-            df_cable_group_all = df[df['base_serie'] == serie_numerica_buscada].copy()
-
-            date_series = pd.to_datetime(df[h['fecha']], dayfirst=True, errors='coerce').dt.strftime('%d/%m/%Y')
-            time_series = df[h['hora']].astype(str).str.replace('a. m.', 'AM', regex=False).str.replace('p. m.', 'PM', regex=False).str.strip()
-            full_datetime_str = date_series + ' ' + time_series
-            df['timestamp'] = pd.to_datetime(full_datetime_str, format='%d/%m/%Y %I:%M:%S %p', errors='coerce')
-            
-            # Volvemos a filtrar el grupo con timestamp ya calculado para validaciones
             df_cable_group_all = df[df['base_serie'] == serie_numerica_buscada].copy()
             
             if df_cable_group_all.empty:
-                return {'status': 'NO ENCONTRADO', 'details': f'Serie no encontrada en {os.path.basename(archivo_a_procesar)}', 'raw_data': []}
+                return {'status': 'NO ENCONTRADO', 'details': f'Serie {serie} no encontrada en el archivo.', 'raw_data': []}
+
+            # Construcción de Timestamp para comparar fechas
+            date_series = pd.to_datetime(df_cable_group_all[h['fecha']], dayfirst=True, errors='coerce').dt.strftime('%d/%m/%Y')
+            time_series = df_cable_group_all[h['hora']].astype(str).str.replace('a. m.', 'AM', regex=False).str.replace('p. m.', 'PM', regex=False).str.strip()
+            full_datetime_str = date_series + ' ' + time_series
+            df_cable_group_all['timestamp'] = pd.to_datetime(full_datetime_str, format='%d/%m/%Y %I:%M:%S %p', errors='coerce')
             
-            filas_invalidas = df_cable_group_all[df_cable_group_all['timestamp'].isna()]
+            # Si hay filas con fechas inválidas, intentamos trabajar con las que sirvan
+            df_cable_group_all.dropna(subset=['timestamp'], inplace=True)
+            if df_cable_group_all.empty:
+                 return {'status': 'ERROR', 'details': 'Fechas inválidas en las mediciones encontradas.', 'raw_data': []}
 
-            if not filas_invalidas.empty:
-                details_str = f"El cable tiene {len(filas_invalidas)} mediciones sin fecha/hora válidas. Revise las columnas '{h['fecha']}' y '{h['hora']}'."
-                raw_data_list = [{'conector': row[h['conector']], 'resultado': row[h['estado']], 'fecha_original': str(row[h['fecha']]), 'hora_original': str(row[h['hora']])} for _, row in filas_invalidas.iterrows()]
-                return {'status': 'DATOS INCOMPLETOS', 'details': details_str, 'raw_data': raw_data_list, 'file_path': archivo_a_procesar, 'error_type': 'fechas_invalidas'}
-
+            # 4. PRIORIZACIÓN (RETRABAJOS vs ORIGINAL)
+            # Buscamos cuál variación del serial (ej. ...001 o ...001-F) es la más reciente
             latest_timestamp = pd.NaT
             best_sub_group_df = None
             serie_para_reporte = "" 
@@ -3231,77 +3266,78 @@ class VerificacionMPO_Page(ttk.Frame):
                     best_sub_group_df = sub_group_df
                     serie_para_reporte = full_serial 
             
-            if best_sub_group_df is None:
-                return {'status': 'NO ENCONTRADO', 'details': 'No se encontraron mediciones válidas.', 'raw_data': []}
-                
             df_cable = best_sub_group_df.copy()
 
+            # 5. VERIFICACIÓN DE FIBRAS (Lado A y B)
             num_conectores_a = config.get('num_conectores_a', 1)
             fibras_por_conector_a = config.get('fibers_per_connector_a', 12)
             num_conectores_b = config.get('num_conectores_b', 1)
             fibras_por_conector_b = config.get('fibers_per_connector_b', 12)
             total_fibras_esperadas = (num_conectores_a * fibras_por_conector_a) + (num_conectores_b * fibras_por_conector_b)
             
+            # Ordenamos por fecha descendente para tomar las últimas mediciones
             df_cable.sort_values(by='timestamp', ascending=False, inplace=True)
+            
+            # Filtramos Lado A y Lado B
             df_lado_a = df_cable[df_cable[h['conector']] == 'A'].head(fibras_por_conector_a * num_conectores_a)
             df_lado_b = df_cable[df_cable[h['conector']] == 'B'].head(fibras_por_conector_b * num_conectores_b)
             
             df_final_cable = pd.concat([df_lado_a, df_lado_b])
 
-            if df_final_cable.empty:
-                return {'status': 'NO ENCONTRADO', 'details': 'El grupo de mediciones más reciente está vacío.', 'raw_data': []}
-
+            # Construcción de datos para mostrar
             raw_data = []
-            overall_pass = True
-            pass_count = 0
             
-            df_final_cable.loc[:, h['estado']] = df_final_cable[h['estado']].str.strip().str.upper()
-            
-            mediciones_lado_a = []
-            estado_lado_a = "APROBADO"
+            # Lado A
+            mediciones_a = []
+            estado_a = "APROBADO"
             for _, row in df_lado_a.iterrows():
-                resultado = str(row[h['estado']]).strip().upper()
-                mediciones_lado_a.append({'fibra': len(mediciones_lado_a)+1, 'resultado': resultado})
-                if resultado == 'PASS': pass_count += 1
-                else: estado_lado_a = "RECHAZADO"; overall_pass = False
-            if not mediciones_lado_a: estado_lado_a = "NO ENCONTRADO"
-            raw_data.append({'conector': 'A', 'estado': estado_lado_a, 'mediciones': mediciones_lado_a})
-            
-            mediciones_lado_b = []
-            estado_lado_b = "APROBADO"
-            for _, row in df_lado_b.iterrows():
-                resultado = str(row[h['estado']]).strip().upper()
-                mediciones_lado_b.append({'fibra': len(mediciones_lado_b)+1, 'resultado': resultado})
-                if resultado == 'PASS': pass_count += 1
-                else: estado_lado_b = "RECHAZADO"; overall_pass = False
-            if not mediciones_lado_b: estado_lado_b = "NO ENCONTRADO"
-            raw_data.append({'conector': 'B', 'estado': estado_lado_b, 'mediciones': mediciones_lado_b})
+                res = str(row[h['estado']]).strip().upper()
+                mediciones_a.append({'fibra': len(mediciones_a)+1, 'resultado': res})
+                if res != 'PASS': estado_a = "RECHAZADO"
+            if not mediciones_a: estado_a = "NO ENCONTRADO"
+            raw_data.append({'conector': 'A', 'estado': estado_a, 'mediciones': mediciones_a})
 
+            # Lado B
+            mediciones_b = []
+            estado_b = "APROBADO"
+            for _, row in df_lado_b.iterrows():
+                res = str(row[h['estado']]).strip().upper()
+                mediciones_b.append({'fibra': len(mediciones_b)+1, 'resultado': res})
+                if res != 'PASS': estado_b = "RECHAZADO"
+            if not mediciones_b: estado_b = "NO ENCONTRADO"
+            raw_data.append({'conector': 'B', 'estado': estado_b, 'mediciones': mediciones_b})
+
+            # Evaluación Final Global
             total_mediciones = len(df_final_cable)
-            if total_mediciones != total_fibras_esperadas: overall_pass = False
+            overall_pass = (estado_a == "APROBADO") and (estado_b == "APROBADO")
+            
+            if total_mediciones != total_fibras_esperadas: 
+                overall_pass = False
+                details = f"Faltan fibras: {total_mediciones}/{total_fibras_esperadas}. Archivo: {os.path.basename(archivo_a_procesar)}"
+            else:
+                # Contamos cuántos PASS reales tenemos en el grupo final
+                pass_count = len(df_final_cable[df_final_cable[h['estado']].str.strip().str.upper() == 'PASS'])
+                details = f"{pass_count}/{total_mediciones} fibras OK. Archivo: {os.path.basename(archivo_a_procesar)}"
 
             status = 'APROBADO' if overall_pass else 'RECHAZADO'
             
-            if total_mediciones != total_fibras_esperadas:
-                details = f"Incompleto: {pass_count}/{total_mediciones} mediciones OK (Esperadas: {total_fibras_esperadas}). Archivo: {os.path.basename(archivo_a_procesar)}"
-            else:
-                details = f"{pass_count}/{total_mediciones} mediciones OK. Archivo: {os.path.basename(archivo_a_procesar)}"
-            
             return {'status': status, 'details': details, 'raw_data': raw_data, 'file_path': archivo_a_procesar, 'serial_number': serie_para_reporte}
 
-        except Exception as e: 
-            return {'status': 'ERROR', 'details': f'Fallo al procesar {os.path.basename(archivo_a_procesar)}: {traceback.format_exc()}', 'raw_data': []}
+        except Exception as e:
+             return {'status': 'ERROR', 'details': f'Error procesando: {e}', 'raw_data': []}
 
-    def buscar_y_procesar_geo_mpo(self, ot, serie, config):
+    def buscar_y_procesar_geo_mpo(self, ot_num, serie, config):
         ruta_base_geo = self.app.config['ruta_base_geo_mpo']
+        
         if not os.path.isdir(ruta_base_geo): 
             return {'status': 'NO ENCONTRADO', 'details': 'Carpeta de Geometría MPO no encontrada.', 'raw_data': []}
         
-        ot_numerica = ot.replace('JMO-', '')
-        archivos_encontrados = [os.path.join(ruta_base_geo, f) for f in os.listdir(ruta_base_geo) if ot_numerica in f and f.lower().endswith(('.xlsx', '.xls')) and not f.startswith('~$')]
+        archivos_encontrados = [os.path.join(self.app.config['ruta_base_geo_mpo'], f) 
+                                for f in os.listdir(self.app.config['ruta_base_geo_mpo']) 
+                                if str(ot_num) in f and f.lower().endswith(('.xlsx', '.xls')) and not f.startswith('~$')]
         
         if not archivos_encontrados: 
-            return {'status': 'NO ENCONTRADO', 'details': f'Ningún archivo de Geometría para la OT "{ot}".', 'raw_data': []}
+            return {'status': 'NO ENCONTRADO', 'details': f'Ningún archivo de Geometría para la OT "{ot_num}".', 'raw_data': []}
         
         archivo_a_procesar = max(archivos_encontrados, key=os.path.getmtime)
 
