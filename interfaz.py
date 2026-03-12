@@ -32,7 +32,7 @@ __version__ = "1.2.1" # IMPORTANTE: Esta es la versión de tu script local
 
 # Reemplaza 'tu-usuario' y 'tu-repositorio' con los tuyos
 URL_VERSION = "https://raw.githubusercontent.com/ZombPool/P-11-Sistema-verificaci-n-de-datos/main/version.txt"
-URL_SCRIPT = "https://github.com/ZombPool/P-11-Sistema-verificaci-n-de-datos/releases/download/1.2.1/interfaz.exe"
+URL_SCRIPT = "https://github.com/ZombPool/P-11-Sistema-verificaci-n-de-datos/releases/download/1.2.2/interfaz.exe"
 # --- Dependencias Requeridas 
 # Intenta importar xlrd para archivos .xls (Geometría antigua)
 try:
@@ -781,12 +781,12 @@ class App(ttk.Window):
         ttk.Button(sidebar_frame, text="Registro WH", command=lambda: self.show_page("RegistroWHMPO"), style='primary.TButton').pack(fill='x', pady=5)
 
         ttk.Label(sidebar_frame, text="FANOUT", font=("Helvetica", 10, "bold"), foreground="#ecf0f1", background="#2c3e50").pack(pady=(15,5), anchor="w", padx=10)
+        ttk.Button(sidebar_frame, text="🔍 Verif. Individual", command=lambda: self.show_page("VerificacionFanout")).pack(fill=tk.X, pady=2)
         ttk.Button(sidebar_frame, text="📊 Análisis de O.T.", command=lambda: self.show_page("ReportesFanout")).pack(fill=tk.X, pady=2)
         ttk.Button(sidebar_frame, text="📦 Registro en Almacén", command=lambda: self.show_page("RegistroWHFanout")).pack(fill=tk.X, pady=2)
         
         ttk.Label(sidebar_frame, text="HERRAMIENTAS", style='inverse-secondary.TLabel', font=("Helvetica", 10, "bold")).pack(pady=(20, 5), anchor='w')
         ttk.Button(sidebar_frame, text="Configurar Rutas", command=self.open_settings_window, style='info.TButton').pack(fill='x', pady=5)
-        ttk.Button(sidebar_frame, text="🔍 Verif. Individual", command=lambda: self.show_page("VerificacionFanout")).pack(fill=tk.X, pady=2)
         ttk.Button(sidebar_frame, text="Ver Registros", command=lambda: self.show_page("Registros"), style='info.TButton').pack(fill='x', pady=5)
         ttk.Button(sidebar_frame, text="Buscar Actualizaciones", command=self.check_for_updates, style='info.outline.TButton').pack(fill='x', pady=5)
 
@@ -4014,37 +4014,38 @@ class AnalisisFanoutPage(tk.Frame):
         # --- OBTENER CONJUNTOS DE NÚMEROS DE SERIE (Aprobados) ---
         self._log("Consultando IL/RL...")
         set_ilrl = self._obtener_set_ilrl(ot_numerica, ot_config)
-        self._log(f"  -> Encontrados OK: {len(set_ilrl)} / {total_esperado}")
+        ejemplo_ilrl = list(set_ilrl)[:3] if set_ilrl else "NADA ENCONTRADO"
+        self._log(f"  -> Encontrados OK: {len(set_ilrl)} / {total_esperado}  (Ej: {ejemplo_ilrl})")
 
         self._log("Consultando Polaridad...")
         set_pol = self._obtener_set_polaridad(ot_numerica)
-        self._log(f"  -> Encontrados OK: {len(set_pol)} / {total_esperado}")
+        ejemplo_pol = list(set_pol)[:3] if set_pol else "NADA ENCONTRADO"
+        self._log(f"  -> Encontrados OK: {len(set_pol)} / {total_esperado}  (Ej: {ejemplo_pol})")
 
         self._log("Consultando Geometría MPO...")
         set_geo_mpo = self._obtener_set_geo_mpo(ot_numerica)
-        self._log(f"  -> Encontrados OK: {len(set_geo_mpo)} / {total_esperado}")
+        ejemplo_geo_mpo = list(set_geo_mpo)[:3] if set_geo_mpo else "NADA ENCONTRADO"
+        self._log(f"  -> Encontrados OK: {len(set_geo_mpo)} / {total_esperado}  (Ej: {ejemplo_geo_mpo})")
 
         self._log("Consultando Geometría LC/FC...")
         set_geo_lc = self._obtener_set_geo_lc(ot_numerica)
-        self._log(f"  -> Encontrados OK: {len(set_geo_lc)} / {diez_por_ciento}")
+        ejemplo_geo_lc = list(set_geo_lc)[:3] if set_geo_lc else "NADA ENCONTRADO"
+        self._log(f"  -> Encontrados OK: {len(set_geo_lc)} / {diez_por_ciento}  (Ej: {ejemplo_geo_lc})")
 
         self._log("-" * 75 + "\n")
 
         # --- CRUCE DE LISTAS (INTERSECCIÓN DEL 100%) ---
-        # Solo los cables que pasaron las 3 pruebas principales entran al reporte
         aprobados_100 = set_ilrl & set_pol & set_geo_mpo
+        
+        self._log(f"Cables con MATCH PERFECTO en las 3 pruebas: {len(aprobados_100)} / {total_esperado}")
 
         # --- EVALUACIÓN FINAL ---
         if len(aprobados_100) >= total_esperado and len(set_geo_lc) >= diez_por_ciento:
-            self._log("¡ÉXITO! Todas las métricas cumplidas. Generando reporte...", "bold")
-            
-            # Generar Excel en el Escritorio
+            self._log("\n¡ÉXITO! Todas las métricas cumplidas. Generando reporte...", "bold")
             self._generar_excel_liberacion(ot_numerica, aprobados_100)
-            
-            # Guardar bandera en la Base de Datos
             self.marcar_lote_liberado(ot_clave_bd, silencioso=False)
         else:
-            self._log("LOTE NO LIBERADO. Faltan mediciones para cumplir las metas.", "error")
+            self._log("\nLOTE NO LIBERADO. Faltan mediciones para cumplir las metas.", "error")
 
     def _log(self, mensaje, tag=None):
         self.result_text.config(state=tk.NORMAL)
@@ -4057,36 +4058,74 @@ class AnalisisFanoutPage(tk.Frame):
         self.result_text.config(state=tk.DISABLED)
         self.result_text.see(tk.END)
 
-    # ================== MÉTODOS DE EXTRACCIÓN Y NORMALIZACIÓN (4 DÍGITOS) ==================
+    # ================== NORMALIZADOR UNIVERSAL ==================
+    # ================== NORMALIZADOR UNIVERSAL ==================
+    # ================== NORMALIZADOR UNIVERSAL ==================
+    def _extraer_4_digitos(self, sn_raw):
+        """Convierte cualquier formato (ej. 1.0, 1, 2603000010001) a '0001' de forma segura"""
+        sn_str = str(sn_raw).strip()
+        if sn_str.endswith('.0'):
+            sn_str = sn_str[:-2]
+            
+        sn_num = re.sub(r'[^0-9]', '', sn_str)
+        if not sn_num: 
+            return None
+        if len(sn_num) >= 4:
+            return sn_num[-4:]
+        else:
+            return f"{int(sn_num):04d}"
+
+    # ================== MÉTODOS DE EXTRACCIÓN ==================
 
     def _obtener_set_ilrl(self, ot_num, config):
         try:
             ruta_base = self.app.config.get('ruta_base_ilrl_mpo', '')
             carpetas = [os.path.join(ruta_base, d) for d in os.listdir(ruta_base) if str(ot_num) in d]
-            if not carpetas: return set()
-            archivos = [os.path.join(max(carpetas, key=os.path.getmtime), f) for f in os.listdir(max(carpetas, key=os.path.getmtime)) if f.lower().endswith('.xlsx') and not f.startswith('~$')]
-            if not archivos: return set()
+            if not carpetas: 
+                self._log("    [Alerta IL/RL] No se encontró la carpeta para esta O.T.")
+                return set()
             
-            df = pd.read_excel(max(archivos, key=os.path.getmtime), sheet_name="Results")
+            carpeta_reciente = max(carpetas, key=os.path.getmtime)
+            # IGNORAMOS archivos de Reporte creados por el sistema
+            archivos = [os.path.join(carpeta_reciente, f) for f in os.listdir(carpeta_reciente) 
+                        if f.lower().endswith(('.xlsx', '.xls')) and not f.startswith('~$')
+                        and "Reporte" not in f and "Analisis" not in f]
+            if not archivos: 
+                self._log("    [Alerta IL/RL] La carpeta está vacía o no tiene archivos crudos.")
+                return set()
+            
+            archivos_ot = [f for f in archivos if str(ot_num) in os.path.basename(f)]
+            archivo_a_procesar = max(archivos_ot, key=os.path.getmtime) if archivos_ot else max(archivos, key=os.path.getmtime)
+            
+            try: df = pd.read_excel(archivo_a_procesar, sheet_name="Results")
+            except ValueError: df = pd.read_excel(archivo_a_procesar, sheet_name=0)
+                
             df.columns = [str(c).strip() for c in df.columns]
+            
             col_serie = config.get('ilrl_serie_header', 'Serial number')
             col_estado = config.get('ilrl_estado_header', 'Alarm Status')
+            col_conector = config.get('ilrl_conector_header', 'connector label')
             
-            if col_serie not in df.columns or col_estado not in df.columns: return set()
+            if col_serie not in df.columns or col_estado not in df.columns: 
+                self._log(f"    [Alerta IL/RL] Faltan encabezados en el Excel.")
+                return set()
             
             pass_series, fail_series = set(), set()
             for _, row in df.iterrows():
-                sn = str(row[col_serie]).strip()
-                if sn.endswith('.0'): sn = sn[:-2]
-                if not sn.isdigit(): continue
-                sn_norm = f"{int(sn):04d}" # Normaliza a '0001'
+                sn_norm = self._extraer_4_digitos(row[col_serie])
+                if not sn_norm: continue
                 
-                if str(row[col_estado]).strip().upper() != 'PASS':
-                    fail_series.add(sn_norm)
-                else:
-                    pass_series.add(sn_norm)
+                polaridad = str(row.get(col_conector, 'A-B')).strip().upper()
+                if polaridad == 'A-B':
+                    if str(row[col_estado]).strip().upper() != 'PASS':
+                        fail_series.add(sn_norm)
+                    else:
+                        pass_series.add(sn_norm)
+            
             return pass_series - fail_series
-        except Exception: return set()
+        except Exception as e: 
+            self._log(f"    [Error IL/RL] Fallo de lectura: {str(e)}")
+            return set()
 
     def _obtener_set_polaridad(self, ot_num):
         try:
@@ -4099,71 +4138,112 @@ class AnalisisFanoutPage(tk.Frame):
                 for root, _, files in os.walk(ruta):
                     if "FAIL" in root.upper() or "RECHAZADO" in root.upper(): continue
                     for f in files:
-                        if ot_num in f and f.lower().endswith('.xlsx') and not f.startswith('~$'):
-                            # Extrae los últimos 4 dígitos del N.S.
-                            match = re.search(r'(' + str(ot_num) + r')(\d{4})', f)
-                            if match: valid_series.add(match.group(2))
+                        if ot_num in f and f.lower().endswith(('.xlsx', '.xls')) and not f.startswith('~$') and "Reporte" not in f and "Analisis" not in f:
+                            match = re.search(r'(\d{13})', f)
+                            if match: 
+                                valid_series.add(self._extraer_4_digitos(match.group(1)))
             return valid_series
-        except Exception: return set()
+        except Exception as e: 
+            self._log(f"    [Error Polaridad] Fallo de lectura: {str(e)}")
+            return set()
 
     def _obtener_set_geo_mpo(self, ot_num):
         try:
             ruta_base = self.app.config.get('ruta_base_geo_mpo', '')
-            archivos = [os.path.join(ruta_base, f) for f in os.listdir(ruta_base) if str(ot_num) in f and not f.startswith('~$')]
-            if not archivos: return set()
+            archivos = [os.path.join(ruta_base, f) for f in os.listdir(ruta_base) 
+                        if str(ot_num) in f and f.lower().endswith(('.xlsx', '.xls')) and not f.startswith('~$')
+                        and "Reporte" not in f and "Analisis" not in f]
+            if not archivos: 
+                self._log("    [Alerta Geo MPO] No se encontraron archivos raw para esta O.T.")
+                return set()
             
-            archivo = max(archivos, key=os.path.getmtime)
-            try: df = pd.read_excel(archivo, sheet_name="MT12", header=None)
-            except ValueError: df = pd.read_excel(archivo, sheet_name=0, header=None)
+            # Un diccionario para que el último test (retrabajo exitoso) reemplace fallas previas
+            cable_status = {}
+            
+            # Recorremos TODOS los archivos de la OT por si hay más de uno
+            for archivo in archivos:
+                try: df = pd.read_excel(archivo, sheet_name="MT12", header=None)
+                except ValueError: df = pd.read_excel(archivo, sheet_name=0, header=None)
 
-            pass_series, fail_series = set(), set()
-            for _, row in df.iterrows():
-                row_str = " ".join([str(x).upper() for x in row.values])
-                match = re.search(r'(' + str(ot_num) + r')(\d{4})', row_str)
-                if match:
-                    sn_norm = match.group(2)
-                    if "FAIL" in row_str: fail_series.add(sn_norm)
-                    else: pass_series.add(sn_norm)
-            return pass_series - fail_series
-        except Exception: return set()
+                for _, row in df.iterrows():
+                    row_str = " ".join([str(x).upper() for x in row.values])
+                    # Buscamos exactamente tu O.T. unida a 4 dígitos (Ej. 260300001 + 0005)
+                    match = re.search(r'(' + str(ot_num) + r'\d{4})', row_str)
+                    if match:
+                        sn_norm = self._extraer_4_digitos(match.group(1))
+                        if sn_norm:
+                            if "FAIL" in row_str:
+                                cable_status[sn_norm] = "FAIL"
+                            else:
+                                cable_status[sn_norm] = "PASS"
+                                
+            # Los que al final del día quedaron como PASS, se aprueban
+            pass_series = {sn for sn, status in cable_status.items() if status == "PASS"}
+            return pass_series
+        except Exception as e: 
+            self._log(f"    [Error Geo MPO] Fallo de lectura: {str(e)}")
+            return set()
 
     def _obtener_set_geo_lc(self, ot_num):
         try:
             ruta_base = self.app.config.get('ruta_base_geo_fanout_lc', '')
-            archivos = [os.path.join(ruta_base, f) for f in os.listdir(ruta_base) if str(ot_num) in f and not f.startswith('~$')]
+            archivos = [os.path.join(ruta_base, f) for f in os.listdir(ruta_base) 
+                        if str(ot_num) in f and f.lower().endswith(('.xlsx', '.xls')) and not f.startswith('~$')
+                        and "Reporte" not in f and "Analisis" not in f]
             if not archivos: return set()
             
-            df = pd.read_excel(max(archivos, key=os.path.getmtime), sheet_name=0, header=None)
+            archivo_a_procesar = max(archivos, key=os.path.getmtime)
+            df = pd.read_excel(archivo_a_procesar, sheet_name=0, header=None)
             if len(df) <= 12: return set()
             df_datos = df.iloc[12:].copy()
 
             pass_series, fail_series = set(), set()
             for _, row in df_datos.iterrows():
                 if len(row) < 9: continue
-                sn = str(row[1]).strip()
-                if sn.endswith('.0'): sn = sn[:-2]
-                if not sn.isdigit(): continue
-                sn_norm = f"{int(sn):04d}"
+                sn_norm = self._extraer_4_digitos(row[1])
+                if not sn_norm: continue
                 
                 if "FAIL" in str(row[8]).upper(): fail_series.add(sn_norm)
                 else: pass_series.add(sn_norm)
             return pass_series - fail_series
-        except Exception: return set()
+        except Exception as e: 
+            self._log(f"    [Error Geo LC] Fallo de lectura: {str(e)}")
+            return set()
 
     # ================== GENERADOR DE REPORTE Y BASE DE DATOS ==================
 
     def _generar_excel_liberacion(self, ot_numerica, set_aprobados):
         try:
-            # 1. Crear carpeta en el Escritorio
-            desktop_path = os.path.join(os.path.expanduser("~"), "Desktop", "Resultados de Fanout")
+            # 1. Encontrar el Escritorio REAL (Considerando OneDrive y Español)
+            home = os.path.expanduser("~")
+            desktop_base = os.path.join(home, "Desktop")
+            
+            posibles_rutas = [
+                os.path.join(home, "OneDrive", "Escritorio"),
+                os.path.join(home, "OneDrive", "Desktop"),
+                os.path.join(home, "Escritorio"),
+                os.path.join(home, "Desktop")
+            ]
+            
+            for item in os.listdir(home):
+                if item.startswith("OneDrive -"):
+                    posibles_rutas.insert(0, os.path.join(home, item, "Escritorio"))
+                    posibles_rutas.insert(0, os.path.join(home, item, "Desktop"))
+
+            for ruta in posibles_rutas:
+                if os.path.exists(ruta):
+                    desktop_base = ruta
+                    break
+            
+            # 2. Crear la carpeta en el Escritorio real
+            desktop_path = os.path.join(desktop_base, "Resultados de Fanout")
             os.makedirs(desktop_path, exist_ok=True)
 
-            # 2. Construir la tabla
+            # 3. Construir la tabla con los N.S. Aprobados
             datos = []
             fecha_actual = pd.Timestamp.now().strftime("%d/%m/%Y %H:%M")
             
             for seq in sorted(set_aprobados):
-                # Aplicamos la regla de la "E" para el cliente final
                 ns_final = f"E{ot_numerica}{seq}"
                 datos.append({
                     "Número de Serie": ns_final,
@@ -4173,13 +4253,19 @@ class AnalisisFanoutPage(tk.Frame):
 
             df = pd.DataFrame(datos)
             
-            # 3. Guardar el archivo
+            # 4. Guardar el archivo Excel
             nombre_archivo = f"Liberacion_Fanout_JMO-{ot_numerica}.xlsx"
             ruta_completa = os.path.join(desktop_path, nombre_archivo)
             
             df.to_excel(ruta_completa, index=False)
             
             self._log(f"\nReporte Oficial creado en:\n{ruta_completa}", "bold")
+            
+            # 5. Abrir la carpeta automáticamente
+            try:
+                os.startfile(desktop_path)
+            except Exception as e:
+                pass
             
         except Exception as e:
             self._log(f"\nError al intentar crear el Excel: {str(e)}", "error")
