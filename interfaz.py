@@ -781,16 +781,16 @@ class App(ttk.Window):
         ttk.Button(sidebar_frame, text="Registro WH", command=lambda: self.show_page("RegistroWHMPO"), style='primary.TButton').pack(fill='x', pady=5)
 
         ttk.Label(sidebar_frame, text="FANOUT", font=("Helvetica", 10, "bold"), foreground="#ecf0f1", background="#2c3e50").pack(pady=(15,5), anchor="w", padx=10)
-        ttk.Button(sidebar_frame, text="🔍 Verif. Individual", command=lambda: self.show_page("VerificacionFanout")).pack(fill=tk.X, pady=2)
         ttk.Button(sidebar_frame, text="📊 Análisis de O.T.", command=lambda: self.show_page("ReportesFanout")).pack(fill=tk.X, pady=2)
         ttk.Button(sidebar_frame, text="📦 Registro en Almacén", command=lambda: self.show_page("RegistroWHFanout")).pack(fill=tk.X, pady=2)
         
         ttk.Label(sidebar_frame, text="HERRAMIENTAS", style='inverse-secondary.TLabel', font=("Helvetica", 10, "bold")).pack(pady=(20, 5), anchor='w')
         ttk.Button(sidebar_frame, text="Configurar Rutas", command=self.open_settings_window, style='info.TButton').pack(fill='x', pady=5)
+        ttk.Button(sidebar_frame, text="🔍 Verif. Individual", command=lambda: self.show_page("VerificacionFanout")).pack(fill=tk.X, pady=2)
         ttk.Button(sidebar_frame, text="Ver Registros", command=lambda: self.show_page("Registros"), style='info.TButton').pack(fill='x', pady=5)
-        ttk.Button(sidebar_frame, text="Diagnóstico DB", command=self.show_db_diagnostics, style='info.TButton').pack(fill='x', pady=5)
         ttk.Button(sidebar_frame, text="Buscar Actualizaciones", command=self.check_for_updates, style='info.outline.TButton').pack(fill='x', pady=5)
 
+        ttk.Button(sidebar_frame, text="Diagnóstico DB", command=self.show_db_diagnostics, style='info.TButton').pack(fill='x', pady=5)
     def create_main_content_area(self):
         self.main_frame = ttk.Frame(self, padding=20)
         self.main_frame.grid(row=0, column=1, sticky="nsew")
@@ -3963,7 +3963,7 @@ class AnalisisFanoutPage(tk.Frame):
         self.setup_ui()
 
     def setup_ui(self):
-        tk.Label(self, text="Liberación de O.T. Fanout (AQL 10%)", font=("Helvetica", 16, "bold"), fg="#2c3e50").pack(pady=20)
+        tk.Label(self, text="Liberación de Lote Fanout (AQL 10%)", font=("Helvetica", 16, "bold"), fg="#2c3e50").pack(pady=20)
 
         controls_frame = tk.Frame(self)
         controls_frame.pack(pady=10)
@@ -3976,13 +3976,12 @@ class AnalisisFanoutPage(tk.Frame):
         self.total_var = tk.StringVar()
         ttk.Entry(controls_frame, textvariable=self.total_var, font=("Helvetica", 12), width=10).grid(row=1, column=1, padx=5, sticky="w")
 
-        ttk.Button(self, text="Validar O.T. Automáticamente", command=self.validar_lote_thread).pack(pady=20)
+        ttk.Button(self, text="Validar Lote Automáticamente", command=self.validar_lote_thread).pack(pady=20)
 
         self.result_text = tk.Text(self, height=18, width=85, font=("Consolas", 11), state=tk.DISABLED, bg="#f8f9fa")
         self.result_text.pack(pady=10, padx=20)
 
     def validar_lote_thread(self):
-        # Limpiamos pantalla y corremos en hilo para no congelar la interfaz
         self.result_text.config(state=tk.NORMAL)
         self.result_text.delete(1.0, tk.END)
         self.result_text.config(state=tk.DISABLED)
@@ -3997,12 +3996,11 @@ class AnalisisFanoutPage(tk.Frame):
             return
 
         total_esperado = int(total_str)
-        diez_por_ciento = max(1, int(total_esperado * 0.10)) # Mínimo 1 cable
+        diez_por_ciento = max(1, int(total_esperado * 0.10))
 
         ot_numerica = re.sub(r'[^0-9]', '', ot_input)
         ot_clave_bd = f"JMO-{ot_numerica}"
 
-        # Cargar configuración de la OT para saber qué columnas leer en IL/RL
         ot_config = self.app.pages["VerificacionFanout"]._cargar_ot_configuration(ot_clave_bd)
         if not ot_config:
             self._log(f"ERROR: No se encontró configuración en BD para {ot_clave_bd}. Configúrela primero.")
@@ -4013,38 +4011,40 @@ class AnalisisFanoutPage(tk.Frame):
         self._log(f"Meta 10% : {diez_por_ciento} cables (Geo LC)\n")
         self._log("-" * 75)
 
-        # --- 1. CONTEO IL/RL (100%) ---
+        # --- OBTENER CONJUNTOS DE NÚMEROS DE SERIE (Aprobados) ---
         self._log("Consultando IL/RL...")
-        cables_ilrl = self._contar_ilrl(ot_numerica, ot_config)
-        self._log(f"  -> Encontrados OK: {cables_ilrl} / {total_esperado}")
+        set_ilrl = self._obtener_set_ilrl(ot_numerica, ot_config)
+        self._log(f"  -> Encontrados OK: {len(set_ilrl)} / {total_esperado}")
 
-        # --- 2. CONTEO POLARIDAD (100%) ---
         self._log("Consultando Polaridad...")
-        cables_pol = self._contar_polaridad(ot_numerica)
-        self._log(f"  -> Encontrados OK: {cables_pol} / {total_esperado}")
+        set_pol = self._obtener_set_polaridad(ot_numerica)
+        self._log(f"  -> Encontrados OK: {len(set_pol)} / {total_esperado}")
 
-        # --- 3. CONTEO GEO MPO (100%) ---
         self._log("Consultando Geometría MPO...")
-        cables_geo_mpo = self._contar_geo_mpo(ot_numerica)
-        self._log(f"  -> Encontrados OK: {cables_geo_mpo} / {total_esperado}")
+        set_geo_mpo = self._obtener_set_geo_mpo(ot_numerica)
+        self._log(f"  -> Encontrados OK: {len(set_geo_mpo)} / {total_esperado}")
 
-        # --- 4. CONTEO GEO LC/FC (10%) ---
         self._log("Consultando Geometría LC/FC...")
-        cables_geo_lc = self._contar_geo_lc(ot_numerica)
-        self._log(f"  -> Encontrados OK: {cables_geo_lc} / {diez_por_ciento}")
+        set_geo_lc = self._obtener_set_geo_lc(ot_numerica)
+        self._log(f"  -> Encontrados OK: {len(set_geo_lc)} / {diez_por_ciento}")
 
         self._log("-" * 75 + "\n")
 
+        # --- CRUCE DE LISTAS (INTERSECCIÓN DEL 100%) ---
+        # Solo los cables que pasaron las 3 pruebas principales entran al reporte
+        aprobados_100 = set_ilrl & set_pol & set_geo_mpo
+
         # --- EVALUACIÓN FINAL ---
-        if (cables_ilrl >= total_esperado and 
-            cables_pol >= total_esperado and 
-            cables_geo_mpo >= total_esperado and 
-            cables_geo_lc >= diez_por_ciento):
+        if len(aprobados_100) >= total_esperado and len(set_geo_lc) >= diez_por_ciento:
+            self._log("¡ÉXITO! Todas las métricas cumplidas. Generando reporte...", "bold")
             
-            self._log("¡ÉXITO! Todas las métricas cumplidas. Liberando O.T....", "bold")
+            # Generar Excel en el Escritorio
+            self._generar_excel_liberacion(ot_numerica, aprobados_100)
+            
+            # Guardar bandera en la Base de Datos
             self.marcar_lote_liberado(ot_clave_bd, silencioso=False)
         else:
-            self._log("O.T. NO LIBERADA. Faltan mediciones para cumplir las metas.", "error")
+            self._log("LOTE NO LIBERADO. Faltan mediciones para cumplir las metas.", "error")
 
     def _log(self, mensaje, tag=None):
         self.result_text.config(state=tk.NORMAL)
@@ -4057,37 +4057,38 @@ class AnalisisFanoutPage(tk.Frame):
         self.result_text.config(state=tk.DISABLED)
         self.result_text.see(tk.END)
 
-    # ================== MÉTODOS DE CONTEO ==================
+    # ================== MÉTODOS DE EXTRACCIÓN Y NORMALIZACIÓN (4 DÍGITOS) ==================
 
-    def _contar_ilrl(self, ot_num, config):
+    def _obtener_set_ilrl(self, ot_num, config):
         try:
             ruta_base = self.app.config.get('ruta_base_ilrl_mpo', '')
             carpetas = [os.path.join(ruta_base, d) for d in os.listdir(ruta_base) if str(ot_num) in d]
-            if not carpetas: return 0
+            if not carpetas: return set()
             archivos = [os.path.join(max(carpetas, key=os.path.getmtime), f) for f in os.listdir(max(carpetas, key=os.path.getmtime)) if f.lower().endswith('.xlsx') and not f.startswith('~$')]
-            if not archivos: return 0
+            if not archivos: return set()
             
             df = pd.read_excel(max(archivos, key=os.path.getmtime), sheet_name="Results")
             df.columns = [str(c).strip() for c in df.columns]
             col_serie = config.get('ilrl_serie_header', 'Serial number')
             col_estado = config.get('ilrl_estado_header', 'Alarm Status')
             
-            if col_serie not in df.columns or col_estado not in df.columns: return 0
+            if col_serie not in df.columns or col_estado not in df.columns: return set()
             
-            # Agrupamos por N.S. secuencial. Un cable cuenta si NINGUNA de sus líneas dice FAIL
             pass_series, fail_series = set(), set()
             for _, row in df.iterrows():
                 sn = str(row[col_serie]).strip()
-                if sn.endswith('.0'): sn = sn[:-2] # Limpiar decimales
+                if sn.endswith('.0'): sn = sn[:-2]
+                if not sn.isdigit(): continue
+                sn_norm = f"{int(sn):04d}" # Normaliza a '0001'
+                
                 if str(row[col_estado]).strip().upper() != 'PASS':
-                    fail_series.add(sn)
+                    fail_series.add(sn_norm)
                 else:
-                    pass_series.add(sn)
-                    
-            return len(pass_series - fail_series)
-        except Exception: return 0
+                    pass_series.add(sn_norm)
+            return pass_series - fail_series
+        except Exception: return set()
 
-    def _contar_polaridad(self, ot_num):
+    def _obtener_set_polaridad(self, ot_num):
         try:
             ruta_base = self.app.config.get('ruta_base_polaridad_mpo', '')
             carpetas = [os.path.join(ruta_base, d) for d in os.listdir(ruta_base) if str(ot_num) in d]
@@ -4099,17 +4100,17 @@ class AnalisisFanoutPage(tk.Frame):
                     if "FAIL" in root.upper() or "RECHAZADO" in root.upper(): continue
                     for f in files:
                         if ot_num in f and f.lower().endswith('.xlsx') and not f.startswith('~$'):
-                            # Extraer serial de 13 dígitos del nombre del archivo
-                            match = re.search(r'(' + str(ot_num) + r'\d{4})', f)
-                            if match: valid_series.add(match.group(1))
-            return len(valid_series)
-        except Exception: return 0
+                            # Extrae los últimos 4 dígitos del N.S.
+                            match = re.search(r'(' + str(ot_num) + r')(\d{4})', f)
+                            if match: valid_series.add(match.group(2))
+            return valid_series
+        except Exception: return set()
 
-    def _contar_geo_mpo(self, ot_num):
+    def _obtener_set_geo_mpo(self, ot_num):
         try:
             ruta_base = self.app.config.get('ruta_base_geo_mpo', '')
             archivos = [os.path.join(ruta_base, f) for f in os.listdir(ruta_base) if str(ot_num) in f and not f.startswith('~$')]
-            if not archivos: return 0
+            if not archivos: return set()
             
             archivo = max(archivos, key=os.path.getmtime)
             try: df = pd.read_excel(archivo, sheet_name="MT12", header=None)
@@ -4118,22 +4119,22 @@ class AnalisisFanoutPage(tk.Frame):
             pass_series, fail_series = set(), set()
             for _, row in df.iterrows():
                 row_str = " ".join([str(x).upper() for x in row.values])
-                match = re.search(r'(' + str(ot_num) + r'\d{4})', row_str)
+                match = re.search(r'(' + str(ot_num) + r')(\d{4})', row_str)
                 if match:
-                    sn = match.group(1)
-                    if "FAIL" in row_str: fail_series.add(sn)
-                    else: pass_series.add(sn)
-            return len(pass_series - fail_series)
-        except Exception: return 0
+                    sn_norm = match.group(2)
+                    if "FAIL" in row_str: fail_series.add(sn_norm)
+                    else: pass_series.add(sn_norm)
+            return pass_series - fail_series
+        except Exception: return set()
 
-    def _contar_geo_lc(self, ot_num):
+    def _obtener_set_geo_lc(self, ot_num):
         try:
             ruta_base = self.app.config.get('ruta_base_geo_fanout_lc', '')
             archivos = [os.path.join(ruta_base, f) for f in os.listdir(ruta_base) if str(ot_num) in f and not f.startswith('~$')]
-            if not archivos: return 0
+            if not archivos: return set()
             
             df = pd.read_excel(max(archivos, key=os.path.getmtime), sheet_name=0, header=None)
-            if len(df) <= 12: return 0
+            if len(df) <= 12: return set()
             df_datos = df.iloc[12:].copy()
 
             pass_series, fail_series = set(), set()
@@ -4141,55 +4142,123 @@ class AnalisisFanoutPage(tk.Frame):
                 if len(row) < 9: continue
                 sn = str(row[1]).strip()
                 if sn.endswith('.0'): sn = sn[:-2]
+                if not sn.isdigit(): continue
+                sn_norm = f"{int(sn):04d}"
                 
-                if "FAIL" in str(row[8]).upper(): fail_series.add(sn)
-                else: pass_series.add(sn)
-            return len(pass_series - fail_series)
-        except Exception: return 0
+                if "FAIL" in str(row[8]).upper(): fail_series.add(sn_norm)
+                else: pass_series.add(sn_norm)
+            return pass_series - fail_series
+        except Exception: return set()
+
+    # ================== GENERADOR DE REPORTE Y BASE DE DATOS ==================
+
+    def _generar_excel_liberacion(self, ot_numerica, set_aprobados):
+        try:
+            # 1. Crear carpeta en el Escritorio
+            desktop_path = os.path.join(os.path.expanduser("~"), "Desktop", "Resultados de Fanout")
+            os.makedirs(desktop_path, exist_ok=True)
+
+            # 2. Construir la tabla
+            datos = []
+            fecha_actual = pd.Timestamp.now().strftime("%d/%m/%Y %H:%M")
+            
+            for seq in sorted(set_aprobados):
+                # Aplicamos la regla de la "E" para el cliente final
+                ns_final = f"E{ot_numerica}{seq}"
+                datos.append({
+                    "Número de Serie": ns_final,
+                    "Estatus": "APROBADO",
+                    "Fecha de Liberación": fecha_actual
+                })
+
+            df = pd.DataFrame(datos)
+            
+            # 3. Guardar el archivo
+            nombre_archivo = f"Liberacion_Fanout_JMO-{ot_numerica}.xlsx"
+            ruta_completa = os.path.join(desktop_path, nombre_archivo)
+            
+            df.to_excel(ruta_completa, index=False)
+            
+            self._log(f"\nReporte Oficial creado en:\n{ruta_completa}", "bold")
+            
+        except Exception as e:
+            self._log(f"\nError al intentar crear el Excel: {str(e)}", "error")
 
     def marcar_lote_liberado(self, ot_clave, silencioso=False):
         try:
             conn = sqlite3.connect(self.app.config['db_path'])
             cursor = conn.cursor()
-            
-            # Asegurar que la columna de la bandera exista
-            try: 
-                cursor.execute("ALTER TABLE ot_configurations ADD COLUMN fanout_lote_liberado INTEGER DEFAULT 0")
-            except sqlite3.OperationalError: 
-                pass
+            try: cursor.execute("ALTER TABLE ot_configurations ADD COLUMN fanout_lote_liberado INTEGER DEFAULT 0")
+            except sqlite3.OperationalError: pass
                 
-            # CORRECCIÓN AQUÍ: Cambiamos 'settings' por 'ot_number'
             cursor.execute("SELECT ot_number FROM ot_configurations WHERE ot_number = ?", (ot_clave,))
             row = cursor.fetchone()
             
             if row:
                 cursor.execute("UPDATE ot_configurations SET fanout_lote_liberado = 1 WHERE ot_number = ?", (ot_clave,))
                 conn.commit()
-                if not silencioso: messagebox.showinfo("Liberado", "La O.T. ha sido validada y liberada en la BD correctamente.")
+                if not silencioso: messagebox.showinfo("Liberado", "Lote Liberado. El reporte Excel se guardó en tu Escritorio.")
             else:
-                if not silencioso: messagebox.showerror("Error", "O.T. no configurada. Configure la O.T. primero.")
+                if not silencioso: messagebox.showerror("Error", "O.T. no configurada.")
             conn.close()
         except Exception as e:
             if not silencioso: messagebox.showerror("Error BD", f"Error: {str(e)}")
 
-class RegistroWHFanout_Page(tk.Frame):
-    def __init__(self, parent, app):
-        super().__init__(parent)
-        self.app = app
-        self.setup_ui()
+class RegistroWHFanout_Page(ttk.Frame):
+    def __init__(self, parent, app_instance):
+        # Heredamos de ttk.Frame y aplicamos padding para mantener el mismo diseño
+        super().__init__(parent, padding=20)
+        self.app = app_instance
 
-    def setup_ui(self):
-        # Título principal
-        tk.Label(self, text="Registro en Almacén (Fanout)", font=("Helvetica", 16, "bold"), fg="#2c3e50").pack(pady=20)
-        
-        # Mensaje temporal
-        self.status_label = tk.Label(
-            self, 
-            text="Módulo en construcción.\nAquí programaremos la lógica para registrar los ensambles Fanout en el Excel de Almacén.", 
-            font=("Helvetica", 12), 
-            fg="gray"
+        # --- Creamos los widgets para esta página ---
+        container = ttk.Frame(self, style='TFrame')
+        container.pack(expand=True, fill='both', pady=20)
+
+        # Un texto descriptivo
+        ttk.Label(
+            container,
+            text="Módulo de Registro en Almacén (Fanout)",
+            font=("Helvetica", 16, "bold")
+        ).pack(pady=10)
+
+        ttk.Label(
+            container,
+            text="Presiona el botón para abrir el archivo de Excel y lanzar el formulario de registro para empaque de productos Fanout.",
+            font=("Helvetica", 11),
+            wraplength=500
+        ).pack(pady=10)
+
+        # El botón que abrirá el archivo de Excel
+        open_button = ttk.Button(
+            container,
+            text="Abrir Excel de Registro (Fanout)",
+            command=self.abrir_registro_fanout,
+            style='success.TButton',
+            padding=15
         )
-        self.status_label.pack(pady=50)
+        open_button.pack(pady=30)
+
+    def abrir_registro_fanout(self):
+        """
+        Busca y abre el MISMO archivo de registro que se usa para MPO, 
+        ya que el usuario indicó que se compartirá la lógica en el mismo Excel.
+        """
+        file_name = "MPORegistroWH.xlsm"
+        
+        try:
+            # Buscamos en el directorio base donde se ejecuta el programa
+            base_path = os.path.dirname(sys.argv[0])
+            file_path = os.path.join(base_path, file_name)
+
+            if os.path.exists(file_path):
+                os.startfile(file_path)
+            else:
+                messagebox.showerror(
+                    "Archivo no Encontrado",
+                    f"No se pudo encontrar el archivo '{file_name}'.\n\nAsegúrate de que esté en la misma carpeta que el programa."
+                )
+        except Exception as e:
+            messagebox.showerror("Error", f"Ocurrió un error al intentar abrir el archivo:\n\n{e}")
 
 class OTConfigWindow(tk.Toplevel):
     def __init__(self, parent_page, app_instance, ot_number):
