@@ -671,6 +671,7 @@ class App(ttk.Window):
             "ruta_base_ilrl_mpo": "C:\\Ruta\\Por\\Defecto\\ILRL_MPO",
             "ruta_base_geo_mpo": "C:\\Ruta\\Por\\Defecto\\Geometria_MPO",
             "ruta_base_polaridad_mpo": "C:\\Ruta\\Por\\Defecto\\Polaridad_MPO",
+            "ruta_base_geo_fanout_lc": "C:\\Ruta\\Por\\Defecto\\Geometria_Fanout_LC",
             
             # --- NUEVO: Switches para MPO (Por defecto todo activado) ---
             "check_mpo_ilrl": True,
@@ -778,6 +779,11 @@ class App(ttk.Window):
         ttk.Button(sidebar_frame, text="Verificación Individual", command=lambda: self.show_page("Verificacion_MPO"), style='primary.TButton').pack(fill='x', pady=5)
         ttk.Button(sidebar_frame, text="Análisis de O.T.", command=lambda: self.show_page("Reportes_MPO"), style='primary.TButton').pack(fill='x', pady=5)
         ttk.Button(sidebar_frame, text="Registro WH", command=lambda: self.show_page("RegistroWHMPO"), style='primary.TButton').pack(fill='x', pady=5)
+
+        ttk.Label(sidebar_frame, text="FANOUT", font=("Helvetica", 10, "bold"), foreground="#ecf0f1", background="#2c3e50").pack(pady=(15,5), anchor="w", padx=10)
+        ttk.Button(sidebar_frame, text="🔍 Verif. Individual", command=lambda: self.show_page("VerificacionFanout")).pack(fill=tk.X, pady=2)
+        ttk.Button(sidebar_frame, text="📊 Análisis de O.T.", command=lambda: self.show_page("ReportesFanout")).pack(fill=tk.X, pady=2)
+        ttk.Button(sidebar_frame, text="📦 Registro en Almacén", command=lambda: self.show_page("RegistroWHFanout")).pack(fill=tk.X, pady=2)
         
         ttk.Label(sidebar_frame, text="HERRAMIENTAS", style='inverse-secondary.TLabel', font=("Helvetica", 10, "bold")).pack(pady=(20, 5), anchor='w')
         ttk.Button(sidebar_frame, text="Configurar Rutas", command=self.open_settings_window, style='info.TButton').pack(fill='x', pady=5)
@@ -805,7 +811,9 @@ class App(ttk.Window):
         self.pages["Reportes_MPO"] = AnalisisMPOPage(self.main_frame, self)
         self.pages["RegistroWH"] = RegistroWH_Page(self.main_frame, self)
         self.pages["RegistroWHMPO"] = RegistroWHMPO_Page(self.main_frame, self)
-
+        self.pages["VerificacionFanout"] = VerificacionFanout_Page(self.main_frame, self)
+        self.pages["ReportesFanout"] = AnalisisFanoutPage(self.main_frame, self)
+        self.pages["RegistroWHFanout"] = RegistroWHFanout_Page(self.main_frame, self)
 
     def show_page(self, page_name):
         title_map = {
@@ -2741,6 +2749,15 @@ class SettingsWindow(tk.Toplevel):
         ttk.Button(frame, text="...", command=lambda: self.browse_folder(self.polaridad_mpo_path)).grid(row=9, column=2, padx=5)
         
         ttk.Separator(frame).grid(row=10, column=0, columnspan=3, pady=10, sticky='ew')
+
+        ttk.Label(frame, text="Rutas FANOUT", font=("Helvetica", 10, "bold")).grid(row=11, column=0, columnspan=3, sticky='w', pady=(0,5))
+        
+        ttk.Label(frame, text="Ruta Geo LC/FC (Fanout):").grid(row=12, column=0, sticky='w', pady=2)
+        self.geo_fanout_path = tk.StringVar(value=self.app.config.get('ruta_base_geo_fanout_lc', ''))
+        ttk.Entry(frame, textvariable=self.geo_fanout_path, width=60).grid(row=12, column=1, sticky='ew', padx=5)
+        ttk.Button(frame, text="...", command=lambda: self.browse_folder(self.geo_fanout_path)).grid(row=12, column=2, padx=5)
+
+        ttk.Separator(frame).grid(row=13, column=0, columnspan=3, pady=10, sticky='ew')
         
         # Database Path
         ttk.Label(frame, text="Ruta Base de Datos:").grid(row=11, column=0, sticky='w', pady=2)
@@ -2779,7 +2796,8 @@ class SettingsWindow(tk.Toplevel):
             "ruta_base_ilrl_mpo": self.ilrl_mpo_path.get(),
             "ruta_base_geo_mpo": self.geo_mpo_path.get(),
             "ruta_base_polaridad_mpo": self.polaridad_mpo_path.get(),
-            "db_path": self.db_path.get()
+            "db_path": self.db_path.get(),
+            "ruta_base_geo_fanout_lc": self.geo_fanout_path.get()
         }
         self.app.save_config(new_config)
         messagebox.showinfo("Guardado", "La configuración se ha guardado correctamente.")
@@ -2836,6 +2854,7 @@ class MPOConfigWindow(tk.Toplevel):
         self.destroy()
 
 class VerificacionMPO_Page(ttk.Frame):
+
     def __init__(self, parent, app_instance):
         super().__init__(parent, padding=10)
         self.app = app_instance
@@ -3507,6 +3526,670 @@ class VerificacionMPO_Page(ttk.Frame):
             
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo abrir la carpeta del archivo:\n{e}", parent=self)
+
+# =======================================================================================
+# ========================= MÓDULOS PARA FANOUT (NUEVO PRODUCTO) ========================
+# =======================================================================================
+
+class VerificacionFanout_Page(tk.Frame):
+    def __init__(self, parent, app):
+        super().__init__(parent)
+        self.app = app
+        self.setup_ui()
+
+    def setup_ui(self):
+        # Título
+        tk.Label(self, text="Verificación Individual (Fanout)", font=("Helvetica", 16, "bold"), fg="#2c3e50").pack(pady=20)
+
+        # Contenedor principal
+        main_frame = tk.Frame(self)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=40)
+
+        # Controles de Entrada (O.T. y Serie)
+        input_frame = tk.Frame(main_frame)
+        input_frame.pack(fill=tk.X, pady=10)
+
+        tk.Label(input_frame, text="Número de O.T.:", font=("Helvetica", 12)).grid(row=0, column=0, padx=5, pady=5, sticky="e")
+        self.ot_entry = ttk.Entry(input_frame, font=("Helvetica", 12), width=25)
+        self.ot_entry.grid(row=0, column=1, padx=5, pady=5)
+
+        tk.Label(input_frame, text="Número de Serie:", font=("Helvetica", 12)).grid(row=1, column=0, padx=5, pady=5, sticky="e")
+        self.serie_entry = ttk.Entry(input_frame, font=("Helvetica", 12), width=25)
+        self.serie_entry.grid(row=1, column=1, padx=5, pady=5)
+        self.serie_entry.bind('<Return>', lambda e: self.verificar_cable())
+
+        # Botones
+        btn_frame = tk.Frame(main_frame)
+        btn_frame.pack(fill=tk.X, pady=15)
+        
+        ttk.Button(btn_frame, text="Verificar Cable", command=self.verificar_cable).pack(side=tk.LEFT, padx=10)
+        ttk.Button(btn_frame, text="Configurar O.T.", command=self.configurar_ot).pack(side=tk.LEFT, padx=10)
+
+        # Área de resultados
+        self.result_text = tk.Text(main_frame, height=20, width=80, font=("Consolas", 11), state=tk.DISABLED, bg="#f8f9fa")
+        self.result_text.pack(pady=20, fill=tk.BOTH, expand=True)
+
+    def _cargar_ot_configuration(self, ot_number):
+        """Carga la configuración desde la tabla real (ot_configurations)"""
+        try:
+            conn = sqlite3.connect(self.app.config['db_path'])
+            conn.row_factory = sqlite3.Row  # Esto convierte los resultados en un diccionario
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM ot_configurations WHERE ot_number = ?", (ot_number,))
+            row = cursor.fetchone()
+            conn.close()
+            return dict(row) if row else None
+        except Exception as e:
+            print(f"Error cargando config: {e}")
+        return None
+
+    def verificar_cable(self, event=None):
+        ot_raw = self.ot_entry.get().strip().upper()
+        serie_raw = self.serie_entry.get().strip()
+
+        if not ot_raw or not serie_raw:
+            return
+
+        # 1. Normalización
+        serie_numerica = re.sub(r'[^0-9]', '', serie_raw)
+        ot_numerica_input = re.sub(r'[^0-9]', '', ot_raw)
+        ot_clave_bd = f"JMO-{ot_numerica_input}"
+
+        if len(serie_numerica) != 13:
+            messagebox.showerror("Formato Inválido", "El número de serie debe contener 13 dígitos.")
+            return
+
+        if ot_numerica_input != serie_numerica[:9]:
+            messagebox.showerror("Error", "La OT del número de serie no coincide con la OT ingresada.")
+            return
+
+        # 2. Cargar Configuración
+        ot_config = self._cargar_ot_configuration(ot_clave_bd)
+        if not ot_config:
+            messagebox.showwarning("Configuración Faltante", f"No se encontró configuración para {ot_clave_bd}.")
+            return
+
+        self.result_text.config(state=tk.NORMAL)
+        self.result_text.delete(1.0, tk.END)
+        self.result_text.insert(tk.END, f"Verificando FANOUT {serie_raw}...\n", "bold")
+        self.result_text.insert(tk.END, "-"*70 + "\n")
+        self.update_idletasks()
+
+        # 3. Ejecutar las 4 Búsquedas
+        # IL/RL (100%)
+        res_ilrl = self.buscar_y_procesar_ilrl_fanout(ot_numerica_input, serie_raw, ot_config)
+        
+        # Polaridad (100%)
+        res_pol = self.buscar_y_procesar_polaridad_fanout(ot_numerica_input, serie_raw)
+        
+        # Geometría MPO (100%) -> Método propio para Fanout (1 punta, sin sufijos)
+        res_geo_mpo = self.buscar_y_procesar_geo_mpo_fanout(ot_numerica_input, serie_raw)
+        
+        # Geometría LC/FC (10%)
+        res_geo_lc = self.buscar_y_procesar_geo_lc_fanout(ot_numerica_input, serie_raw)
+
+        # 4. Evaluar la Lógica del 10% para LC
+        lote_liberado = ot_config.get("fanout_lote_liberado", False)
+        
+        if res_geo_lc['status'] == 'NO ENCONTRADO':
+            if lote_liberado:
+                res_geo_lc['status'] = "EXENTO (Muestreo OK)"
+                res_geo_lc['details'] = "La O.T. ya fue liberada por calidad (10% cumplido)."
+            else:
+                res_geo_lc['status'] = "RECHAZADO (NO MUESTREADO)"
+                res_geo_lc['details'] = "Cable sin medición y la O.T. AÚN NO ha sido liberada."
+
+        # 5. Mostrar Resultados en Pantalla
+        def imprimir_res(nombre, resultado):
+            self.result_text.insert(tk.END, f"{nombre}:\n", "bold")
+            self.result_text.insert(tk.END, f"  Estado:  {resultado['status']}\n")
+            self.result_text.insert(tk.END, f"  Detalle: {resultado['details']}\n\n")
+
+        imprimir_res("1. IL/RL (100%)", res_ilrl)
+        imprimir_res("2. Polaridad (100%)", res_pol)
+        imprimir_res("3. Geometría MPO (100%)", res_geo_mpo)
+        imprimir_res("4. Geometría LC/FC (10%)", res_geo_lc)
+
+        # 6. Semáforo Final
+        ok_ilrl = res_ilrl['status'] in ["APROBADO"]
+        ok_pol = res_pol['status'] in ["APROBADO", "PASS"]
+        ok_geo_mpo = res_geo_mpo['status'] in ["APROBADO"]
+        ok_geo_lc = res_geo_lc['status'] in ["APROBADO", "EXENTO (Muestreo OK)"]
+
+        final_status = "APROBADO" if (ok_ilrl and ok_pol and ok_geo_mpo and ok_geo_lc) else "RECHAZADO"
+
+        self.result_text.insert(tk.END, "-"*70 + "\n")
+        self.result_text.insert(tk.END, f"ESTADO FINAL: {final_status}\n", "bold")
+        
+        if winsound:
+            try:
+                if final_status == "APROBADO": winsound.Beep(1200, 200)
+                else: winsound.Beep(400, 500)
+            except: pass
+
+        self.result_text.config(state=tk.DISABLED)
+
+    def configurar_ot(self):
+        ot_input = self.ot_entry.get().strip().upper()
+        if not ot_input:
+            messagebox.showwarning("Falta OT", "Ingrese un número de OT antes de configurar.", parent=self)
+            return
+            
+        # Normalizar a JMO- para guardar en BD
+        ot_numeros = re.sub(r'[^0-9]', '', ot_input)
+        ot_clave_bd = f"JMO-{ot_numeros}"
+        
+        # Abrimos la ventana de configuración estándar
+        OTConfigWindow(self, self.app, ot_clave_bd)
+    
+    # --- NUEVOS MÉTODOS PARA FASE 2 ---
+
+    def buscar_y_procesar_geo_lc_fanout(self, ot_num, serie_buscada):
+        """
+        Lee el reporte de Geometría DIMENSION para conectores LC/FC.
+        Datos a partir de la Fila 13.
+        Col B (1) = N.S. Secuencial, Col C (2) = Conector, Col I (8) = Pass/Fail
+        """
+        ruta_base = self.app.config.get('ruta_base_geo_fanout_lc', '') 
+        
+        if not ruta_base or not os.path.isdir(ruta_base):
+            return {'status': 'ERROR', 'details': 'Ruta base de Geometría LC/FC no configurada o no existe.', 'raw_data': []}
+
+        archivos_encontrados = [
+            os.path.join(ruta_base, f) 
+            for f in os.listdir(ruta_base) 
+            if str(ot_num) in f and f.lower().endswith(('.xlsx', '.xls')) and not f.startswith('~$')
+        ]
+
+        if not archivos_encontrados:
+            return {'status': 'NO ENCONTRADO', 'details': f'Sin archivo de Geometría LC para OT {ot_num}.', 'raw_data': []}
+
+        archivo_a_procesar = max(archivos_encontrados, key=os.path.getmtime)
+        
+        # --- NUEVA LÓGICA DE SERIE: Extraer el secuencial (ej. "0001" -> "1") ---
+        serie_numerica = re.sub(r'[^0-9]', '', serie_buscada)
+        if len(serie_numerica) >= 4:
+            secuencial_buscado = str(int(serie_numerica[-4:]))
+        else:
+            secuencial_buscado = serie_numerica
+
+        try:
+            # Leemos el Excel sin encabezados para evitar problemas con el formato
+            df = pd.read_excel(archivo_a_procesar, sheet_name=0, header=None)
+            
+            # En pandas, la fila 13 de Excel es el índice 12
+            if len(df) <= 12:
+                return {'status': 'ERROR', 'details': 'El archivo tiene menos de 13 filas (formato incorrecto).', 'raw_data': []}
+                
+            # Cortamos el DataFrame para quedarnos solo con los datos puros
+            df_datos = df.iloc[12:].copy()
+            
+            raw_data = []
+            status_global = "APROBADO"
+            puntas_encontradas = 0
+
+            # Iteramos sobre las filas de datos
+            for index, row in df_datos.iterrows():
+                # Seguridad: Si la fila no tiene suficientes columnas, la ignoramos
+                if len(row) < 9: continue
+                
+                # Columna B es el índice 1
+                row_sn = str(row[1]).strip() 
+                # Evitar que pandas lea el número como "1.0"
+                if row_sn.endswith('.0'): row_sn = row_sn[:-2]
+                
+                # Si el secuencial coincide con la fila actual
+                if row_sn == secuencial_buscado:
+                    puntas_encontradas += 1
+                    
+                    # Columna C es el índice 2 (Número de conector)
+                    conector_id = str(row[2]).strip()
+                    if conector_id.endswith('.0'): conector_id = conector_id[:-2]
+                    
+                    # Columna I es el índice 8 (Pass/Fail)
+                    resultado_texto = str(row[8]).strip().upper()
+                    
+                    res_punta = "RECHAZADO" if "FAIL" in resultado_texto else "APROBADO"
+                    if res_punta == "RECHAZADO":
+                        status_global = "RECHAZADO"
+
+                    raw_data.append({
+                        'conector': f"Punta {conector_id}",
+                        'resultado': res_punta,
+                        'serie_completo': serie_buscada
+                    })
+
+            # Si el cable no está en el Excel (porque solo prueban el 10%)
+            if puntas_encontradas == 0:
+                return {'status': 'NO ENCONTRADO', 'details': f'Secuencial {secuencial_buscado} NO muestreado en LC.', 'raw_data': []}
+
+            details = f"Geometría LC: {puntas_encontradas} puntas medidas OK. Archivo: {os.path.basename(archivo_a_procesar)}"
+            
+            return {'status': status_global, 'details': details, 'raw_data': raw_data, 'file_path': archivo_a_procesar}
+
+        except Exception as e:
+            return {'status': 'ERROR', 'details': f'Error leyendo Geometría LC: {e}', 'raw_data': []}
+
+    def buscar_y_procesar_ilrl_fanout(self, ot_num, serie_buscada, config):
+        """
+        Lee el reporte IL/RL SANTEC para Fanout.
+        Busca el N.S. secuencial (ej. '1') y valida que la polaridad sea 'A-B'.
+        """
+        base_path = self.app.config.get('ruta_base_ilrl_mpo', '')
+        
+        if not base_path or not os.path.isdir(base_path):
+            return {'status': 'ERROR', 'details': 'Ruta base de IL/RL no configurada.', 'raw_data': []}
+            
+        carpetas_candidatas = [
+            os.path.join(base_path, d) for d in os.listdir(base_path) 
+            if str(ot_num) in d and os.path.isdir(os.path.join(base_path, d))
+        ]
+        
+        if not carpetas_candidatas:
+            return {'status': 'NO ENCONTRADO', 'details': f'Carpeta de OT {ot_num} no encontrada en ILRL.', 'raw_data': []}
+        
+        ruta_ot_ilrl = max(carpetas_candidatas, key=os.path.getmtime)
+        
+        archivos = [
+            os.path.join(ruta_ot_ilrl, f) for f in os.listdir(ruta_ot_ilrl) 
+            if f.lower().endswith(('.xlsx', '.xls')) and not f.startswith('~$') and str(ot_num) in f
+        ]
+        
+        if not archivos:
+            return {'status': 'NO ENCONTRADO', 'details': f'Archivo .xlsx no encontrado.', 'raw_data': []}
+            
+        archivo_a_procesar = max(archivos, key=os.path.getmtime)
+        
+        try:
+            df = pd.read_excel(archivo_a_procesar, sheet_name="Results")
+            df.columns = [str(c).strip() for c in df.columns]
+            
+            h = {k: config.get(v, d) for k, v, d in [
+                ('serie', 'ilrl_serie_header', 'Serial number'), 
+                ('estado', 'ilrl_estado_header', 'Alarm Status'), 
+                ('conector', 'ilrl_conector_header', 'connector label')
+            ]}
+            
+            missing = [h_val for h_val in h.values() if h_val not in df.columns]
+            if missing:
+                return {'status': 'ERROR', 'details': f"Faltan encabezados: {', '.join(missing)}", 'raw_data': []}
+
+            # --- NUEVA LÓGICA DE BÚSQUEDA ---
+            # Extraemos los últimos 4 dígitos del N.S. y lo convertimos a entero para quitar ceros a la izquierda
+            serie_numerica_completa = re.sub(r'[^0-9]', '', serie_buscada)
+            if len(serie_numerica_completa) >= 4:
+                secuencial_buscado = str(int(serie_numerica_completa[-4:])) # "0001" -> "1"
+            else:
+                secuencial_buscado = serie_numerica_completa
+
+            # Filtramos el DataFrame buscando ese número secuencial exacto
+            df[h['serie']] = df[h['serie']].astype(str).str.strip()
+            df_cable = df[df[h['serie']] == secuencial_buscado].copy()
+            
+            if df_cable.empty:
+                return {'status': 'NO ENCONTRADO', 'details': f'Secuencial {secuencial_buscado} no hallado.', 'raw_data': []}
+
+            raw_data = []
+            status_global = "APROBADO"
+            pass_count = 0
+            
+            # Evaluamos las lecturas (Polaridad A-B y Status PASS)
+            for index, row in df_cable.iterrows():
+                estado = str(row.get(h['estado'], '')).strip().upper()
+                polaridad = str(row.get(h['conector'], '')).strip().upper()
+                
+                # Validamos ambas condiciones
+                if estado == 'PASS' and polaridad == 'A-B':
+                    pass_count += 1
+                    res_linea = "APROBADO"
+                else:
+                    status_global = "RECHAZADO"
+                    res_linea = f"RECHAZADO ({estado} | {polaridad})"
+                    
+                raw_data.append({'conector': polaridad, 'estado': res_linea})
+            
+            if status_global == "APROBADO":
+                details = f"Secuencial {secuencial_buscado}: {pass_count} lecturas 'A-B' OK."
+            else:
+                details = f"Secuencial {secuencial_buscado}: Rechazado por Estado o Polaridad incorrecta."
+                
+            return {'status': status_global, 'details': details, 'raw_data': raw_data, 'file_path': archivo_a_procesar}
+
+        except Exception as e:
+            return {'status': 'ERROR', 'details': f'Error en ILRL Fanout: {e}', 'raw_data': []}
+
+
+    def buscar_y_procesar_polaridad_fanout(self, ot_num, serie_buscada):
+        """
+        Busca el reporte de Polaridad. Reutiliza la misma ruta y lógica que Polaridad MPO.
+        """
+        ruta_base = self.app.config.get('ruta_base_polaridad_mpo', '')
+        
+        if not ruta_base or not os.path.isdir(ruta_base):
+            return {'status': 'ERROR', 'details': 'Ruta de Polaridad no configurada.', 'raw_data': {}}
+            
+        carpetas_ot = [
+            os.path.join(ruta_base, d) for d in os.listdir(ruta_base) 
+            if str(ot_num) in d and os.path.isdir(os.path.join(ruta_base, d))
+        ]
+        rutas_a_escanear = carpetas_ot if carpetas_ot else [ruta_base]
+        
+        serie_sin_prefijo = re.sub(r'[^0-9]', '', serie_buscada)
+        archivos_candidatos = []
+        
+        for ruta in rutas_a_escanear:
+            for root, _, files in os.walk(ruta):
+                for f in files:
+                    if serie_sin_prefijo in f and f.lower().endswith('.xlsx') and not f.startswith('~$'):
+                        archivos_candidatos.append(os.path.join(root, f))
+        
+        if not archivos_candidatos: 
+            return {'status': 'NO ENCONTRADO', 'details': f'Sin archivo de Polaridad para "{serie_buscada}".', 'raw_data': {}}
+            
+        archivo_a_procesar = max(archivos_candidatos, key=os.path.getmtime)
+        
+        try:
+            folder_name = os.path.basename(os.path.dirname(archivo_a_procesar)).upper()
+            status = "RECHAZADO" if ("FAIL" in folder_name or "RECHAZADO" in folder_name) else "APROBADO"
+            details = f"Archivo en carpeta: {folder_name}"
+            raw_data = {'archivo': os.path.basename(archivo_a_procesar), 'carpeta': folder_name}
+            
+            return {'status': status, 'details': details, 'raw_data': raw_data, 'file_path': archivo_a_procesar}
+            
+        except Exception as e:
+            return {'status': 'ERROR', 'details': f'Error en Polaridad Fanout: {e}', 'raw_data': {}}
+    
+    def buscar_y_procesar_geo_mpo_fanout(self, ot_num, serie_buscada):
+        """
+        Busca el reporte de Geometría MPO específico para Fanout.
+        Espera encontrar solo 1 medición sin sufijos (ej. JMO2603000010001).
+        """
+        ruta_base_geo = self.app.config.get('ruta_base_geo_mpo', '')
+        
+        if not ruta_base_geo or not os.path.isdir(ruta_base_geo): 
+            return {'status': 'ERROR', 'details': 'Ruta de Geometría MPO no configurada.', 'raw_data': []}
+        
+        archivos_encontrados = [
+            os.path.join(ruta_base_geo, f) for f in os.listdir(ruta_base_geo) 
+            if str(ot_num) in f and f.lower().endswith(('.xlsx', '.xls')) and not f.startswith('~$')
+        ]
+        
+        if not archivos_encontrados: 
+            return {'status': 'NO ENCONTRADO', 'details': f'Sin archivo de Geometría MPO para OT {ot_num}.', 'raw_data': []}
+        
+        archivo_a_procesar = max(archivos_encontrados, key=os.path.getmtime)
+
+        try:
+            # Tolerancia al nombre de la pestaña
+            try:
+                full_df = pd.read_excel(archivo_a_procesar, sheet_name="MT12", header=None)
+            except ValueError:
+                full_df = pd.read_excel(archivo_a_procesar, sheet_name=0, header=None)
+
+            serie_numerica_buscada = re.sub(r'[^0-9]', '', serie_buscada)
+            
+            raw_data = []
+            status = "NO ENCONTRADO"
+            details = "No se encontraron mediciones."
+
+            for index, row in full_df.iterrows():
+                row_str = " ".join([str(x).upper() for x in row.values])
+                
+                # Buscamos la coincidencia exacta de los 13 dígitos
+                if serie_numerica_buscada in row_str:
+                    line_status = "RECHAZADO" if "FAIL" in row_str else "APROBADO"
+                    status = line_status
+                    details = f"Medición MPO (1 punta) {line_status}."
+                    
+                    raw_data.append({
+                        'conector': 'MPO (Lado A)',
+                        'resultado': line_status,
+                        'serie_completo': serie_buscada
+                    })
+                    break # Solo esperamos 1 punta, así que detenemos la búsqueda
+
+            if status == "NO ENCONTRADO":
+                details = f"Serie {serie_buscada} no hallada en {os.path.basename(archivo_a_procesar)}"
+
+            return {'status': status, 'details': details, 'raw_data': raw_data, 'file_path': archivo_a_procesar}
+
+        except Exception as e:
+            return {'status': 'ERROR', 'details': f'Fallo al procesar: {e}', 'raw_data': []}
+
+class AnalisisFanoutPage(tk.Frame):
+    def __init__(self, parent, app):
+        super().__init__(parent)
+        self.app = app
+        self.setup_ui()
+
+    def setup_ui(self):
+        tk.Label(self, text="Liberación de O.T. Fanout (AQL 10%)", font=("Helvetica", 16, "bold"), fg="#2c3e50").pack(pady=20)
+
+        controls_frame = tk.Frame(self)
+        controls_frame.pack(pady=10)
+
+        tk.Label(controls_frame, text="Número de O.T.:", font=("Helvetica", 12)).grid(row=0, column=0, padx=5, sticky="e")
+        self.ot_var = tk.StringVar()
+        ttk.Entry(controls_frame, textvariable=self.ot_var, font=("Helvetica", 12), width=20).grid(row=0, column=1, padx=5)
+
+        tk.Label(controls_frame, text="Cantidad Total de Cables:", font=("Helvetica", 12)).grid(row=1, column=0, padx=5, pady=10, sticky="e")
+        self.total_var = tk.StringVar()
+        ttk.Entry(controls_frame, textvariable=self.total_var, font=("Helvetica", 12), width=10).grid(row=1, column=1, padx=5, sticky="w")
+
+        ttk.Button(self, text="Validar O.T. Automáticamente", command=self.validar_lote_thread).pack(pady=20)
+
+        self.result_text = tk.Text(self, height=18, width=85, font=("Consolas", 11), state=tk.DISABLED, bg="#f8f9fa")
+        self.result_text.pack(pady=10, padx=20)
+
+    def validar_lote_thread(self):
+        # Limpiamos pantalla y corremos en hilo para no congelar la interfaz
+        self.result_text.config(state=tk.NORMAL)
+        self.result_text.delete(1.0, tk.END)
+        self.result_text.config(state=tk.DISABLED)
+        threading.Thread(target=self.ejecutar_validacion, daemon=True).start()
+
+    def ejecutar_validacion(self):
+        ot_input = self.ot_var.get().strip().upper()
+        total_str = self.total_var.get().strip()
+
+        if not ot_input or not total_str.isdigit():
+            self._log("ERROR: Ingrese O.T. y una cantidad válida numérica.")
+            return
+
+        total_esperado = int(total_str)
+        diez_por_ciento = max(1, int(total_esperado * 0.10)) # Mínimo 1 cable
+
+        ot_numerica = re.sub(r'[^0-9]', '', ot_input)
+        ot_clave_bd = f"JMO-{ot_numerica}"
+
+        # Cargar configuración de la OT para saber qué columnas leer en IL/RL
+        ot_config = self.app.pages["VerificacionFanout"]._cargar_ot_configuration(ot_clave_bd)
+        if not ot_config:
+            self._log(f"ERROR: No se encontró configuración en BD para {ot_clave_bd}. Configúrela primero.")
+            return
+
+        self._log(f"Iniciando Validación para OT: {ot_clave_bd}")
+        self._log(f"Meta 100%: {total_esperado} cables (IL/RL, Polaridad, Geo MPO)")
+        self._log(f"Meta 10% : {diez_por_ciento} cables (Geo LC)\n")
+        self._log("-" * 75)
+
+        # --- 1. CONTEO IL/RL (100%) ---
+        self._log("Consultando IL/RL...")
+        cables_ilrl = self._contar_ilrl(ot_numerica, ot_config)
+        self._log(f"  -> Encontrados OK: {cables_ilrl} / {total_esperado}")
+
+        # --- 2. CONTEO POLARIDAD (100%) ---
+        self._log("Consultando Polaridad...")
+        cables_pol = self._contar_polaridad(ot_numerica)
+        self._log(f"  -> Encontrados OK: {cables_pol} / {total_esperado}")
+
+        # --- 3. CONTEO GEO MPO (100%) ---
+        self._log("Consultando Geometría MPO...")
+        cables_geo_mpo = self._contar_geo_mpo(ot_numerica)
+        self._log(f"  -> Encontrados OK: {cables_geo_mpo} / {total_esperado}")
+
+        # --- 4. CONTEO GEO LC/FC (10%) ---
+        self._log("Consultando Geometría LC/FC...")
+        cables_geo_lc = self._contar_geo_lc(ot_numerica)
+        self._log(f"  -> Encontrados OK: {cables_geo_lc} / {diez_por_ciento}")
+
+        self._log("-" * 75 + "\n")
+
+        # --- EVALUACIÓN FINAL ---
+        if (cables_ilrl >= total_esperado and 
+            cables_pol >= total_esperado and 
+            cables_geo_mpo >= total_esperado and 
+            cables_geo_lc >= diez_por_ciento):
+            
+            self._log("¡ÉXITO! Todas las métricas cumplidas. Liberando O.T....", "bold")
+            self.marcar_lote_liberado(ot_clave_bd, silencioso=False)
+        else:
+            self._log("O.T. NO LIBERADA. Faltan mediciones para cumplir las metas.", "error")
+
+    def _log(self, mensaje, tag=None):
+        self.result_text.config(state=tk.NORMAL)
+        if tag:
+            self.result_text.insert(tk.END, mensaje + "\n", tag)
+            self.result_text.tag_config("bold", font=("Consolas", 11, "bold"), foreground="green")
+            self.result_text.tag_config("error", font=("Consolas", 11, "bold"), foreground="red")
+        else:
+            self.result_text.insert(tk.END, mensaje + "\n")
+        self.result_text.config(state=tk.DISABLED)
+        self.result_text.see(tk.END)
+
+    # ================== MÉTODOS DE CONTEO ==================
+
+    def _contar_ilrl(self, ot_num, config):
+        try:
+            ruta_base = self.app.config.get('ruta_base_ilrl_mpo', '')
+            carpetas = [os.path.join(ruta_base, d) for d in os.listdir(ruta_base) if str(ot_num) in d]
+            if not carpetas: return 0
+            archivos = [os.path.join(max(carpetas, key=os.path.getmtime), f) for f in os.listdir(max(carpetas, key=os.path.getmtime)) if f.lower().endswith('.xlsx') and not f.startswith('~$')]
+            if not archivos: return 0
+            
+            df = pd.read_excel(max(archivos, key=os.path.getmtime), sheet_name="Results")
+            df.columns = [str(c).strip() for c in df.columns]
+            col_serie = config.get('ilrl_serie_header', 'Serial number')
+            col_estado = config.get('ilrl_estado_header', 'Alarm Status')
+            
+            if col_serie not in df.columns or col_estado not in df.columns: return 0
+            
+            # Agrupamos por N.S. secuencial. Un cable cuenta si NINGUNA de sus líneas dice FAIL
+            pass_series, fail_series = set(), set()
+            for _, row in df.iterrows():
+                sn = str(row[col_serie]).strip()
+                if sn.endswith('.0'): sn = sn[:-2] # Limpiar decimales
+                if str(row[col_estado]).strip().upper() != 'PASS':
+                    fail_series.add(sn)
+                else:
+                    pass_series.add(sn)
+                    
+            return len(pass_series - fail_series)
+        except Exception: return 0
+
+    def _contar_polaridad(self, ot_num):
+        try:
+            ruta_base = self.app.config.get('ruta_base_polaridad_mpo', '')
+            carpetas = [os.path.join(ruta_base, d) for d in os.listdir(ruta_base) if str(ot_num) in d]
+            rutas_escanear = carpetas if carpetas else [ruta_base]
+            
+            valid_series = set()
+            for ruta in rutas_escanear:
+                for root, _, files in os.walk(ruta):
+                    if "FAIL" in root.upper() or "RECHAZADO" in root.upper(): continue
+                    for f in files:
+                        if ot_num in f and f.lower().endswith('.xlsx') and not f.startswith('~$'):
+                            # Extraer serial de 13 dígitos del nombre del archivo
+                            match = re.search(r'(' + str(ot_num) + r'\d{4})', f)
+                            if match: valid_series.add(match.group(1))
+            return len(valid_series)
+        except Exception: return 0
+
+    def _contar_geo_mpo(self, ot_num):
+        try:
+            ruta_base = self.app.config.get('ruta_base_geo_mpo', '')
+            archivos = [os.path.join(ruta_base, f) for f in os.listdir(ruta_base) if str(ot_num) in f and not f.startswith('~$')]
+            if not archivos: return 0
+            
+            archivo = max(archivos, key=os.path.getmtime)
+            try: df = pd.read_excel(archivo, sheet_name="MT12", header=None)
+            except ValueError: df = pd.read_excel(archivo, sheet_name=0, header=None)
+
+            pass_series, fail_series = set(), set()
+            for _, row in df.iterrows():
+                row_str = " ".join([str(x).upper() for x in row.values])
+                match = re.search(r'(' + str(ot_num) + r'\d{4})', row_str)
+                if match:
+                    sn = match.group(1)
+                    if "FAIL" in row_str: fail_series.add(sn)
+                    else: pass_series.add(sn)
+            return len(pass_series - fail_series)
+        except Exception: return 0
+
+    def _contar_geo_lc(self, ot_num):
+        try:
+            ruta_base = self.app.config.get('ruta_base_geo_fanout_lc', '')
+            archivos = [os.path.join(ruta_base, f) for f in os.listdir(ruta_base) if str(ot_num) in f and not f.startswith('~$')]
+            if not archivos: return 0
+            
+            df = pd.read_excel(max(archivos, key=os.path.getmtime), sheet_name=0, header=None)
+            if len(df) <= 12: return 0
+            df_datos = df.iloc[12:].copy()
+
+            pass_series, fail_series = set(), set()
+            for _, row in df_datos.iterrows():
+                if len(row) < 9: continue
+                sn = str(row[1]).strip()
+                if sn.endswith('.0'): sn = sn[:-2]
+                
+                if "FAIL" in str(row[8]).upper(): fail_series.add(sn)
+                else: pass_series.add(sn)
+            return len(pass_series - fail_series)
+        except Exception: return 0
+
+    def marcar_lote_liberado(self, ot_clave, silencioso=False):
+        try:
+            conn = sqlite3.connect(self.app.config['db_path'])
+            cursor = conn.cursor()
+            
+            # Asegurar que la columna de la bandera exista
+            try: 
+                cursor.execute("ALTER TABLE ot_configurations ADD COLUMN fanout_lote_liberado INTEGER DEFAULT 0")
+            except sqlite3.OperationalError: 
+                pass
+                
+            # CORRECCIÓN AQUÍ: Cambiamos 'settings' por 'ot_number'
+            cursor.execute("SELECT ot_number FROM ot_configurations WHERE ot_number = ?", (ot_clave,))
+            row = cursor.fetchone()
+            
+            if row:
+                cursor.execute("UPDATE ot_configurations SET fanout_lote_liberado = 1 WHERE ot_number = ?", (ot_clave,))
+                conn.commit()
+                if not silencioso: messagebox.showinfo("Liberado", "La O.T. ha sido validada y liberada en la BD correctamente.")
+            else:
+                if not silencioso: messagebox.showerror("Error", "O.T. no configurada. Configure la O.T. primero.")
+            conn.close()
+        except Exception as e:
+            if not silencioso: messagebox.showerror("Error BD", f"Error: {str(e)}")
+
+class RegistroWHFanout_Page(tk.Frame):
+    def __init__(self, parent, app):
+        super().__init__(parent)
+        self.app = app
+        self.setup_ui()
+
+    def setup_ui(self):
+        # Título principal
+        tk.Label(self, text="Registro en Almacén (Fanout)", font=("Helvetica", 16, "bold"), fg="#2c3e50").pack(pady=20)
+        
+        # Mensaje temporal
+        self.status_label = tk.Label(
+            self, 
+            text="Módulo en construcción.\nAquí programaremos la lógica para registrar los ensambles Fanout en el Excel de Almacén.", 
+            font=("Helvetica", 12), 
+            fg="gray"
+        )
+        self.status_label.pack(pady=50)
 
 class OTConfigWindow(tk.Toplevel):
     def __init__(self, parent_page, app_instance, ot_number):
