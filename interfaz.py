@@ -28,11 +28,11 @@ except ImportError:
     print("Librería 'winsound' no encontrada. No se reproducirán sonidos (solo disponible en Windows).")
     winsound = None
 
-__version__ = "1.2.1" # IMPORTANTE: Esta es la versión de tu script local
+__version__ = "1.2.31" # IMPORTANTE: Esta es la versión de tu script local
 
 # Reemplaza 'tu-usuario' y 'tu-repositorio' con los tuyos
 URL_VERSION = "https://raw.githubusercontent.com/ZombPool/P-11-Sistema-verificaci-n-de-datos/main/version.txt"
-URL_SCRIPT = "https://github.com/ZombPool/P-11-Sistema-verificaci-n-de-datos/releases/download/1.2.2/interfaz.exe"
+URL_SCRIPT = "https://github.com/ZombPool/P-11-Sistema-verificaci-n-de-datos/releases/download/1.2.31/interfaz.exe"
 # --- Dependencias Requeridas 
 # Intenta importar xlrd para archivos .xls (Geometría antigua)
 try:
@@ -673,11 +673,14 @@ class App(ttk.Window):
             "ruta_base_polaridad_mpo": "C:\\Ruta\\Por\\Defecto\\Polaridad_MPO",
             "ruta_base_geo_fanout_lc": "C:\\Ruta\\Por\\Defecto\\Geometria_Fanout_LC",
             
-            # --- NUEVO: Switches para MPO (Por defecto todo activado) ---
+            # --- NUEVAS RUTAS PARA UNIBOOT ---
+            "ruta_base_ilrl_uniboot": "",
+            "ruta_base_geo_uniboot": "",
+            # ---------------------------------
+            
             "check_mpo_ilrl": True,
             "check_mpo_geo": True,
             "check_mpo_polaridad": True,
-            # ------------------------------------------------------------
             
             "db_path": os.path.join(os.path.expanduser('~'), 'Documents', 'FibraTraceData', 'verifications.db')
         }
@@ -742,55 +745,99 @@ class App(ttk.Window):
 
     # En la clase App, reemplaza este método completo:
     def create_sidebar(self):
-        sidebar_frame = ttk.Frame(self, style='secondary.TFrame', padding=10)
-        sidebar_frame.grid(row=0, column=0, sticky="ns")
+        # Frame principal de la barra lateral
+        self.sidebar_frame = ttk.Frame(self, style='secondary.TFrame', padding=(0, 10))
+        self.sidebar_frame.grid(row=0, column=0, sticky="ns")
 
-        ttk.Label(sidebar_frame, text="FibraTrace", font=("Helvetica", 18, "bold"), style='inverse-secondary.TLabel').pack(pady=10)
-        ttk.Separator(sidebar_frame).pack(fill='x', pady=10)
+        # Título y separador
+        ttk.Label(self.sidebar_frame, text="FibraTrace", font=("Helvetica", 18, "bold"), style='inverse-secondary.TLabel').pack(pady=(10, 5))
+        ttk.Separator(self.sidebar_frame).pack(fill='x', pady=10, padx=15)
 
-        ttk.Button(sidebar_frame, text="Dashboard", command=lambda: self.show_page("Dashboard"), style='primary.TButton').pack(fill='x', pady=5)
+        # Botón Dashboard (Siempre visible en la parte superior)
+        ttk.Button(self.sidebar_frame, text="🏠 Dashboard", command=lambda: self.show_page("Dashboard"), style='primary.TButton').pack(fill='x', pady=5, padx=15)
 
-        ttk.Label(sidebar_frame, text="PRODUCTOS SC & LC", style='inverse-secondary.TLabel', font=("Helvetica", 10, "bold")).pack(pady=(20, 5), anchor='w')
+        # =====================================================================
+        # FUNCIÓN AUXILIAR: Crea menús estilo "Acordeón"
+        # =====================================================================
+        def crear_seccion(titulo, botones_info, incluir_switch=False, color_estilo='info.TButton'):
+            # Botón principal (Cabecera)
+            head_btn = ttk.Button(self.sidebar_frame, text=f"▶ {titulo}", style=color_estilo)
+            head_btn.pack(fill='x', pady=(10, 0), padx=15)
+            
+            # Contenedor de las sub-opciones (inicia oculto)
+            sub_frame = ttk.Frame(self.sidebar_frame, style='secondary.TFrame')
+            
+            # Lógica para mostrar/ocultar
+            def toggle(frame=sub_frame, btn=head_btn):
+                if frame.winfo_ismapped():
+                    frame.pack_forget()
+                    btn.config(text=btn.cget('text').replace('▼', '▶'))
+                else:
+                    frame.pack(fill='x', pady=5, padx=25, after=btn) # after=btn lo coloca justo debajo
+                    btn.config(text=btn.cget('text').replace('▶', '▼'))
+
+            head_btn.config(command=toggle)
+            
+            # (Opcional) Agregar el switch de Simplex/Duplex dentro del acordeón
+            if incluir_switch:
+                switch_frame = ttk.Frame(sub_frame, style='secondary.TFrame')
+                switch_frame.pack(fill='x', pady=(5, 10))
+                ttk.Label(switch_frame, text="Simplex", style='inverse-secondary.TLabel', font=("Helvetica", 8)).pack(side='left')
+                self.mode_switch = ttk.Checkbutton(switch_frame, bootstyle="primary-round-toggle", variable=self.cable_mode, onvalue="Duplex", offvalue="Simplex")
+                self.mode_switch.pack(side='left', padx=5)
+                ttk.Label(switch_frame, text="Duplex", style='inverse-secondary.TLabel', font=("Helvetica", 8)).pack(side='left')
+
+            # Crear los botones internos con estilo "Outline" para diferenciarlos
+            for btn_texto, icono, comando in botones_info:
+                btn = ttk.Button(sub_frame, text=f"{icono} {btn_texto}", command=comando, style='primary.outline.TButton')
+                btn.pack(fill='x', pady=3)
+                
+            return sub_frame, head_btn
+
+        # =====================================================================
+        # CREANDO LAS SECCIONES DE PRODUCCIÓN
+        # =====================================================================
         
-        # --- BLOQUE AÑADIDO: Interruptor Simplex/Duplex ---
-        switch_frame = ttk.Frame(sidebar_frame, style='secondary.TFrame')
-        switch_frame.pack(fill='x', pady=5, padx=5)
-        
-        simplex_label = ttk.Label(switch_frame, text="Simplex", style='inverse-secondary.TLabel')
-        simplex_label.pack(side='left')
-        
-        self.mode_switch = ttk.Checkbutton(
-            switch_frame,
-            bootstyle="primary-round-toggle",
-            variable=self.cable_mode,
-            onvalue="Duplex",
-            offvalue="Simplex"
-        )
-        self.mode_switch.pack(side='left', padx=5)
-        
-        duplex_label = ttk.Label(switch_frame, text="Duplex", style='inverse-secondary.TLabel')
-        duplex_label.pack(side='left')
-        # ----------------------------------------------------
-        ttk.Button(sidebar_frame, text="Verificación Individual", command=lambda: self.show_page("Verificacion_LC_SC"), style='primary.TButton').pack(fill='x', pady=5)
-        ttk.Button(sidebar_frame, text="Análisis de O.T.", command=lambda: self.show_page("Reportes_LC_SC"), style='primary.TButton').pack(fill='x', pady=5)
-        ttk.Button(sidebar_frame, text="Registro WH", command=lambda: self.show_page("RegistroWH"), style='primary.TButton').pack(fill='x', pady=5)
+        crear_seccion("SC & LC", [
+            ("Verificación Individual", "🔍", lambda: self.show_page("Verificacion_LC_SC")),
+            ("Análisis de O.T.", "📊", lambda: self.show_page("Reportes_LC_SC")),
+            ("Registro en Almacén", "📦", lambda: self.show_page("RegistroWH"))
+        ], incluir_switch=True)
 
-        ttk.Label(sidebar_frame, text="PRODUCTOS MPO", style='inverse-secondary.TLabel', font=("Helvetica", 10, "bold")).pack(pady=(20, 5), anchor='w')
-        ttk.Button(sidebar_frame, text="Verificación Individual", command=lambda: self.show_page("Verificacion_MPO"), style='primary.TButton').pack(fill='x', pady=5)
-        ttk.Button(sidebar_frame, text="Análisis de O.T.", command=lambda: self.show_page("Reportes_MPO"), style='primary.TButton').pack(fill='x', pady=5)
-        ttk.Button(sidebar_frame, text="Registro WH", command=lambda: self.show_page("RegistroWHMPO"), style='primary.TButton').pack(fill='x', pady=5)
+        crear_seccion("MPO", [
+            ("Verificación Individual", "🔍", lambda: self.show_page("Verificacion_MPO")),
+            ("Análisis de O.T.", "📊", lambda: self.show_page("Reportes_MPO")),
+            ("Registro en Almacén", "📦", lambda: self.show_page("RegistroWHMPO"))
+        ])
 
-        ttk.Label(sidebar_frame, text="FANOUT", font=("Helvetica", 10, "bold"), foreground="#ecf0f1", background="#2c3e50").pack(pady=(15,5), anchor="w", padx=10)
-        ttk.Button(sidebar_frame, text="🔍 Verif. Individual", command=lambda: self.show_page("VerificacionFanout")).pack(fill=tk.X, pady=2)
-        ttk.Button(sidebar_frame, text="📊 Análisis de O.T.", command=lambda: self.show_page("ReportesFanout")).pack(fill=tk.X, pady=2)
-        ttk.Button(sidebar_frame, text="📦 Registro en Almacén", command=lambda: self.show_page("RegistroWHFanout")).pack(fill=tk.X, pady=2)
+        crear_seccion("FANOUT", [
+            ("Verificación Individual", "🔍", lambda: self.show_page("VerificacionFanout")),
+            ("Liberación de Lote", "📊", lambda: self.show_page("ReportesFanout")),
+            ("Registro en Almacén", "📦", lambda: self.show_page("RegistroWHFanout"))
+        ])
+
+        crear_seccion("UNIBOOT", [
+            ("Verificación Individual", "🔍", lambda: self.show_page("VerificacionUniboot"))
+        ])
         
-        ttk.Label(sidebar_frame, text="HERRAMIENTAS", style='inverse-secondary.TLabel', font=("Helvetica", 10, "bold")).pack(pady=(20, 5), anchor='w')
-        ttk.Button(sidebar_frame, text="Configurar Rutas", command=self.open_settings_window, style='info.TButton').pack(fill='x', pady=5)
-        ttk.Button(sidebar_frame, text="Ver Registros", command=lambda: self.show_page("Registros"), style='info.TButton').pack(fill='x', pady=5)
-        ttk.Button(sidebar_frame, text="Buscar Actualizaciones", command=self.check_for_updates, style='info.outline.TButton').pack(fill='x', pady=5)
+        # =====================================================================
+        # ZONA DE ADMINISTRACIÓN (Al fondo de la pantalla)
+        # =====================================================================
+        
+        # Espaciador invisible que empuja todo lo de abajo hacia el final de la pantalla
+        ttk.Frame(self.sidebar_frame, style='secondary.TFrame').pack(fill='both', expand=True)
+        ttk.Separator(self.sidebar_frame).pack(fill='x', pady=5, padx=15)
 
-        ttk.Button(sidebar_frame, text="Diagnóstico DB", command=self.show_db_diagnostics, style='info.TButton').pack(fill='x', pady=5)
+        # Sección de herramientas con un color gris más sobrio (secondary)
+        sub_tools, btn_tools = crear_seccion("ADMINISTRACIÓN", [
+            ("Configurar Rutas", "⚙️", self.open_settings_window),
+            ("Ver Registros DB", "📋", lambda: self.show_page("Registros")),
+            ("Diagnóstico DB", "🗄️", self.show_db_diagnostics),
+            ("Actualizaciones", "🔄", self.check_for_updates)
+        ], color_estilo='secondary.TButton')
+        
+        # Reposicionamos el botón base para que se ancle al fondo
+        btn_tools.pack(side='bottom', fill='x', pady=(0, 20), padx=15)
     def create_main_content_area(self):
         self.main_frame = ttk.Frame(self, padding=20)
         self.main_frame.grid(row=0, column=1, sticky="nsew")
@@ -814,6 +861,7 @@ class App(ttk.Window):
         self.pages["VerificacionFanout"] = VerificacionFanout_Page(self.main_frame, self)
         self.pages["ReportesFanout"] = AnalisisFanoutPage(self.main_frame, self)
         self.pages["RegistroWHFanout"] = RegistroWHFanout_Page(self.main_frame, self)
+        self.pages["VerificacionUniboot"] = VerificacionUniboot_Page(self.main_frame, self)
 
     def show_page(self, page_name):
         title_map = {
@@ -2691,38 +2739,44 @@ class SettingsWindow(tk.Toplevel):
         super().__init__(app_instance)
         self.app = app_instance
         self.title("Configurar Rutas")
-        self.geometry("800x500") # Hacemos la ventana más alta
+        self.geometry("800x650") # Ajustado para más espacio
         self.transient(self.app)
         self.grab_set()
 
         self.bind_class("TEntry", "<FocusIn>", open_keyboard)
 
-        frame = ttk.Frame(self, padding=20)
-        frame.pack(fill='both', expand=True)
+        # Usamos un Canvas para permitir Scroll en caso de pantallas pequeñas
+        main_frame = ttk.Frame(self)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        canvas = tk.Canvas(main_frame, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(main_frame, orient="vertical", command=canvas.yview)
+        frame = ttk.Frame(canvas, padding=20)
+        
+        frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
         frame.columnconfigure(1, weight=1)
 
         # --- SECCIÓN LC/SC ---
         ttk.Label(frame, text="Rutas SC/LC", font=("Helvetica", 10, "bold")).grid(row=0, column=0, columnspan=3, sticky='w', pady=(0,5))
-
-        # ILRL Primaria
         ttk.Label(frame, text="Ruta ILRL (Principal):").grid(row=1, column=0, sticky='w', pady=2)
-        self.ilrl_path = tk.StringVar(value=self.app.config['ruta_base_ilrl'])
+        self.ilrl_path = tk.StringVar(value=self.app.config.get('ruta_base_ilrl', ''))
         ttk.Entry(frame, textvariable=self.ilrl_path, width=60).grid(row=1, column=1, sticky='ew', padx=5)
         ttk.Button(frame, text="...", command=lambda: self.browse_folder(self.ilrl_path)).grid(row=1, column=2, padx=5)
 
-        # ILRL Secundaria (NUEVO)
         ttk.Label(frame, text="Ruta ILRL (Secundaria):").grid(row=2, column=0, sticky='w', pady=2)
         self.ilrl_path_2 = tk.StringVar(value=self.app.config.get('ruta_base_ilrl_2', ''))
         ttk.Entry(frame, textvariable=self.ilrl_path_2, width=60).grid(row=2, column=1, sticky='ew', padx=5)
         ttk.Button(frame, text="...", command=lambda: self.browse_folder(self.ilrl_path_2)).grid(row=2, column=2, padx=5)
 
-        # Geo Primaria
         ttk.Label(frame, text="Ruta Geometría (Principal):").grid(row=3, column=0, sticky='w', pady=2)
-        self.geo_path = tk.StringVar(value=self.app.config['ruta_base_geo'])
+        self.geo_path = tk.StringVar(value=self.app.config.get('ruta_base_geo', ''))
         ttk.Entry(frame, textvariable=self.geo_path, width=60).grid(row=3, column=1, sticky='ew', padx=5)
         ttk.Button(frame, text="...", command=lambda: self.browse_folder(self.geo_path)).grid(row=3, column=2, padx=5)
 
-        # Geo Secundaria (NUEVO)
         ttk.Label(frame, text="Ruta Geometría (Secundaria):").grid(row=4, column=0, sticky='w', pady=2)
         self.geo_path_2 = tk.StringVar(value=self.app.config.get('ruta_base_geo_2', ''))
         ttk.Entry(frame, textvariable=self.geo_path_2, width=60).grid(row=4, column=1, sticky='ew', padx=5)
@@ -2732,26 +2786,25 @@ class SettingsWindow(tk.Toplevel):
 
         # --- SECCIÓN MPO ---
         ttk.Label(frame, text="Rutas MPO", font=("Helvetica", 10, "bold")).grid(row=6, column=0, columnspan=3, sticky='w', pady=(0,5))
-
         ttk.Label(frame, text="Ruta ILRL (MPO):").grid(row=7, column=0, sticky='w', pady=2)
-        self.ilrl_mpo_path = tk.StringVar(value=self.app.config['ruta_base_ilrl_mpo'])
+        self.ilrl_mpo_path = tk.StringVar(value=self.app.config.get('ruta_base_ilrl_mpo', ''))
         ttk.Entry(frame, textvariable=self.ilrl_mpo_path, width=60).grid(row=7, column=1, sticky='ew', padx=5)
         ttk.Button(frame, text="...", command=lambda: self.browse_folder(self.ilrl_mpo_path)).grid(row=7, column=2, padx=5)
 
         ttk.Label(frame, text="Ruta Geometría (MPO):").grid(row=8, column=0, sticky='w', pady=2)
-        self.geo_mpo_path = tk.StringVar(value=self.app.config['ruta_base_geo_mpo'])
+        self.geo_mpo_path = tk.StringVar(value=self.app.config.get('ruta_base_geo_mpo', ''))
         ttk.Entry(frame, textvariable=self.geo_mpo_path, width=60).grid(row=8, column=1, sticky='ew', padx=5)
         ttk.Button(frame, text="...", command=lambda: self.browse_folder(self.geo_mpo_path)).grid(row=8, column=2, padx=5)
 
         ttk.Label(frame, text="Ruta Polaridad (MPO):").grid(row=9, column=0, sticky='w', pady=2)
-        self.polaridad_mpo_path = tk.StringVar(value=self.app.config['ruta_base_polaridad_mpo'])
+        self.polaridad_mpo_path = tk.StringVar(value=self.app.config.get('ruta_base_polaridad_mpo', ''))
         ttk.Entry(frame, textvariable=self.polaridad_mpo_path, width=60).grid(row=9, column=1, sticky='ew', padx=5)
         ttk.Button(frame, text="...", command=lambda: self.browse_folder(self.polaridad_mpo_path)).grid(row=9, column=2, padx=5)
         
         ttk.Separator(frame).grid(row=10, column=0, columnspan=3, pady=10, sticky='ew')
 
+        # --- SECCIÓN FANOUT ---
         ttk.Label(frame, text="Rutas FANOUT", font=("Helvetica", 10, "bold")).grid(row=11, column=0, columnspan=3, sticky='w', pady=(0,5))
-        
         ttk.Label(frame, text="Ruta Geo LC/FC (Fanout):").grid(row=12, column=0, sticky='w', pady=2)
         self.geo_fanout_path = tk.StringVar(value=self.app.config.get('ruta_base_geo_fanout_lc', ''))
         ttk.Entry(frame, textvariable=self.geo_fanout_path, width=60).grid(row=12, column=1, sticky='ew', padx=5)
@@ -2759,14 +2812,28 @@ class SettingsWindow(tk.Toplevel):
 
         ttk.Separator(frame).grid(row=13, column=0, columnspan=3, pady=10, sticky='ew')
         
-        # Database Path
-        ttk.Label(frame, text="Ruta Base de Datos:").grid(row=11, column=0, sticky='w', pady=2)
-        self.db_path = tk.StringVar(value=self.app.config['db_path'])
-        ttk.Entry(frame, textvariable=self.db_path, width=60).grid(row=11, column=1, sticky='ew', padx=5)
-        ttk.Button(frame, text="...", command=self.browse_db_file).grid(row=11, column=2, padx=5)
+        # --- SECCIÓN UNIBOOT ---
+        ttk.Label(frame, text="Rutas UNIBOOT", font=("Helvetica", 10, "bold")).grid(row=14, column=0, columnspan=3, sticky='w', pady=(0,5))
+        ttk.Label(frame, text="Ruta ILRL (Uniboot):").grid(row=15, column=0, sticky='w', pady=2)
+        self.ilrl_uniboot_path = tk.StringVar(value=self.app.config.get('ruta_base_ilrl_uniboot', ''))
+        ttk.Entry(frame, textvariable=self.ilrl_uniboot_path, width=60).grid(row=15, column=1, sticky='ew', padx=5)
+        ttk.Button(frame, text="...", command=lambda: self.browse_folder(self.ilrl_uniboot_path)).grid(row=15, column=2, padx=5)
+
+        ttk.Label(frame, text="Ruta Geometría (Uniboot):").grid(row=16, column=0, sticky='w', pady=2)
+        self.geo_uniboot_path = tk.StringVar(value=self.app.config.get('ruta_base_geo_uniboot', ''))
+        ttk.Entry(frame, textvariable=self.geo_uniboot_path, width=60).grid(row=16, column=1, sticky='ew', padx=5)
+        ttk.Button(frame, text="...", command=lambda: self.browse_folder(self.geo_uniboot_path)).grid(row=16, column=2, padx=5)
+
+        ttk.Separator(frame).grid(row=17, column=0, columnspan=3, pady=10, sticky='ew')
+
+        # --- Base de Datos ---
+        ttk.Label(frame, text="Ruta Base de Datos:").grid(row=18, column=0, sticky='w', pady=2)
+        self.db_path = tk.StringVar(value=self.app.config.get('db_path', ''))
+        ttk.Entry(frame, textvariable=self.db_path, width=60).grid(row=18, column=1, sticky='ew', padx=5)
+        ttk.Button(frame, text="...", command=self.browse_db_file).grid(row=18, column=2, padx=5)
         
         btn_frame = ttk.Frame(frame)
-        btn_frame.grid(row=12, column=0, columnspan=3, pady=20)
+        btn_frame.grid(row=19, column=0, columnspan=3, pady=20)
         ttk.Button(btn_frame, text="Guardar", command=self.save_and_close, style='success.TButton').pack(side='left', padx=10)
         ttk.Button(btn_frame, text="Cancelar", command=self.destroy, style='danger.TButton').pack(side='left', padx=10)
         
@@ -2790,14 +2857,17 @@ class SettingsWindow(tk.Toplevel):
     def save_and_close(self):
         new_config = {
             "ruta_base_ilrl": self.ilrl_path.get(),
-            "ruta_base_ilrl_2": self.ilrl_path_2.get(), # Nuevo
+            "ruta_base_ilrl_2": self.ilrl_path_2.get(),
             "ruta_base_geo": self.geo_path.get(),
-            "ruta_base_geo_2": self.geo_path_2.get(),   # Nuevo
+            "ruta_base_geo_2": self.geo_path_2.get(),
             "ruta_base_ilrl_mpo": self.ilrl_mpo_path.get(),
             "ruta_base_geo_mpo": self.geo_mpo_path.get(),
             "ruta_base_polaridad_mpo": self.polaridad_mpo_path.get(),
             "db_path": self.db_path.get(),
-            "ruta_base_geo_fanout_lc": self.geo_fanout_path.get()
+            "ruta_base_geo_fanout_lc": self.geo_fanout_path.get(),
+            # Guardamos las de Uniboot
+            "ruta_base_ilrl_uniboot": self.ilrl_uniboot_path.get(),
+            "ruta_base_geo_uniboot": self.geo_uniboot_path.get()
         }
         self.app.save_config(new_config)
         messagebox.showinfo("Guardado", "La configuración se ha guardado correctamente.")
@@ -3992,7 +4062,7 @@ class AnalisisFanoutPage(tk.Frame):
         total_str = self.total_var.get().strip()
 
         if not ot_input or not total_str.isdigit():
-            self._log("ERROR: Ingrese O.T. y una cantidad válida numérica.")
+            self._log("ERROR: Ingrese O.T. y una cantidad válida numérica.", "error")
             return
 
         total_esperado = int(total_str)
@@ -4003,49 +4073,58 @@ class AnalisisFanoutPage(tk.Frame):
 
         ot_config = self.app.pages["VerificacionFanout"]._cargar_ot_configuration(ot_clave_bd)
         if not ot_config:
-            self._log(f"ERROR: No se encontró configuración en BD para {ot_clave_bd}. Configúrela primero.")
+            self._log(f"ERROR: No se encontró configuración en BD para {ot_clave_bd}. Configúrela primero.", "error")
             return
 
-        self._log(f"Iniciando Validación para OT: {ot_clave_bd}")
-        self._log(f"Meta 100%: {total_esperado} cables (IL/RL, Polaridad, Geo MPO)")
-        self._log(f"Meta 10% : {diez_por_ciento} cables (Geo LC)\n")
+        self._log(f"Iniciando Validación (NUEVA LÓGICA DE VOLUMEN) para OT: {ot_clave_bd}")
+        self._log(f"Meta Volumen: {total_esperado} mediciones aprobadas por estación")
+        self._log(f"Meta Volumen (10%): {diez_por_ciento} mediciones aprobadas en Geo LC\n")
         self._log("-" * 75)
 
-        # --- OBTENER CONJUNTOS DE NÚMEROS DE SERIE (Aprobados) ---
-        self._log("Consultando IL/RL...")
+        # --- OBTENER CANTIDADES DE APROBADOS (Validación por Volumen) ---
+        self._log("Consultando IL/RL (Estación final que define los N.S.)...")
         set_ilrl = self._obtener_set_ilrl(ot_numerica, ot_config)
-        ejemplo_ilrl = list(set_ilrl)[:3] if set_ilrl else "NADA ENCONTRADO"
-        self._log(f"  -> Encontrados OK: {len(set_ilrl)} / {total_esperado}  (Ej: {ejemplo_ilrl})")
+        self._log(f"  -> Aprobados: {len(set_ilrl)} / {total_esperado}")
 
         self._log("Consultando Polaridad...")
         set_pol = self._obtener_set_polaridad(ot_numerica)
-        ejemplo_pol = list(set_pol)[:3] if set_pol else "NADA ENCONTRADO"
-        self._log(f"  -> Encontrados OK: {len(set_pol)} / {total_esperado}  (Ej: {ejemplo_pol})")
+        self._log(f"  -> Aprobados: {len(set_pol)} / {total_esperado}")
 
         self._log("Consultando Geometría MPO...")
         set_geo_mpo = self._obtener_set_geo_mpo(ot_numerica)
-        ejemplo_geo_mpo = list(set_geo_mpo)[:3] if set_geo_mpo else "NADA ENCONTRADO"
-        self._log(f"  -> Encontrados OK: {len(set_geo_mpo)} / {total_esperado}  (Ej: {ejemplo_geo_mpo})")
+        self._log(f"  -> Aprobados: {len(set_geo_mpo)} / {total_esperado}")
 
         self._log("Consultando Geometría LC/FC...")
         set_geo_lc = self._obtener_set_geo_lc(ot_numerica)
-        ejemplo_geo_lc = list(set_geo_lc)[:3] if set_geo_lc else "NADA ENCONTRADO"
-        self._log(f"  -> Encontrados OK: {len(set_geo_lc)} / {diez_por_ciento}  (Ej: {ejemplo_geo_lc})")
+        self._log(f"  -> Aprobados: {len(set_geo_lc)} / {diez_por_ciento}")
 
         self._log("-" * 75 + "\n")
 
-        # --- CRUCE DE LISTAS (INTERSECCIÓN DEL 100%) ---
-        aprobados_100 = set_ilrl & set_pol & set_geo_mpo
-        
-        self._log(f"Cables con MATCH PERFECTO en las 3 pruebas: {len(aprobados_100)} / {total_esperado}")
+        # --- EVALUACIÓN DE VOLÚMENES ---
+        pasa_ilrl = len(set_ilrl) >= total_esperado
+        pasa_pol = len(set_pol) >= total_esperado
+        pasa_geo_mpo = len(set_geo_mpo) >= total_esperado
+        pasa_geo_lc = len(set_geo_lc) >= diez_por_ciento
 
-        # --- EVALUACIÓN FINAL ---
-        if len(aprobados_100) >= total_esperado and len(set_geo_lc) >= diez_por_ciento:
-            self._log("\n¡ÉXITO! Todas las métricas cumplidas. Generando reporte...", "bold")
-            self._generar_excel_liberacion(ot_numerica, aprobados_100)
+        if pasa_ilrl and pasa_pol and pasa_geo_mpo and pasa_geo_lc:
+            self._log("\n¡ÉXITO! Se cumplieron las cantidades requeridas en todas las estaciones.", "bold")
+            self._log("Generando Master de Liberación con los N.S. extraídos de IL/RL...", "bold")
+            
+            # Generamos el Excel basándonos EXCLUSIVAMENTE en los cables de IL/RL
+            self._generar_excel_liberacion(ot_numerica, set_ilrl)
             self.marcar_lote_liberado(ot_clave_bd, silencioso=False)
         else:
-            self._log("\nLOTE NO LIBERADO. Faltan mediciones para cumplir las metas.", "error")
+            self._log("\nLOTE NO LIBERADO. Faltan mediciones aprobadas en una o más estaciones.", "error")
+            
+            # Diagnóstico de faltantes por estación
+            if not pasa_ilrl: 
+                self._log(f"  • IL/RL: Faltan {total_esperado - len(set_ilrl)} mediciones aprobadas.", "error")
+            if not pasa_pol: 
+                self._log(f"  • Polaridad: Faltan {total_esperado - len(set_pol)} mediciones aprobadas.", "error")
+            if not pasa_geo_mpo: 
+                self._log(f"  • Geo MPO: Faltan {total_esperado - len(set_geo_mpo)} mediciones aprobadas.", "error")
+            if not pasa_geo_lc: 
+                self._log(f"  • Geo LC: Faltan {diez_por_ciento - len(set_geo_lc)} mediciones aprobadas.", "error")
 
     def _log(self, mensaje, tag=None):
         self.result_text.config(state=tk.NORMAL)
@@ -4057,10 +4136,7 @@ class AnalisisFanoutPage(tk.Frame):
             self.result_text.insert(tk.END, mensaje + "\n")
         self.result_text.config(state=tk.DISABLED)
         self.result_text.see(tk.END)
-
-    # ================== NORMALIZADOR UNIVERSAL ==================
-    # ================== NORMALIZADOR UNIVERSAL ==================
-    # ================== NORMALIZADOR UNIVERSAL ==================
+    
     def _extraer_4_digitos(self, sn_raw):
         """Convierte cualquier formato (ej. 1.0, 1, 2603000010001) a '0001' de forma segura"""
         sn_str = str(sn_raw).strip()
@@ -4593,7 +4669,369 @@ class DetailsWindow(tk.Toplevel):
         
         return (), []
 
+# =======================================================================================
+# ========================= MÓDULO PARA UNIBOOT (HÍBRIDO LC/SC + FANOUT) ================
+# =======================================================================================
+
+class VerificacionUniboot_Page(ttk.Frame):
+    def __init__(self, parent, app_instance):
+        super().__init__(parent, padding=10)
+        self.app = app_instance 
+        self.last_ilrl_result = None 
+        self.last_geo_result = None
+        self.create_widgets()
+
+    def create_widgets(self):
+        container = ttk.Frame(self, style='TFrame', padding=20)
+        container.pack(expand=True, fill='both')
+        
+        input_frame = ttk.Frame(container)
+        input_frame.pack(fill='x', pady=10)
+        
+        ttk.Label(input_frame, text="Número de OT:", font=("Helvetica", 11, "bold")).grid(row=0, column=0, sticky='w', padx=5, pady=5)
+        self.ot_entry = ttk.Entry(input_frame, width=30, font=("Helvetica", 11))
+        self.ot_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=5)
+        
+        ttk.Label(input_frame, text="Número de Serie (13 dígitos):", font=("Helvetica", 11, "bold")).grid(row=1, column=0, sticky='w', padx=5, pady=5)
+        self.serie_entry = ttk.Entry(input_frame, width=30, font=("Helvetica", 11))
+        self.serie_entry.grid(row=1, column=1, sticky='ew', padx=5, pady=5)
+        self.serie_entry.bind("<KeyRelease>", self.verificar_cable_automatico)
+        
+        input_frame.columnconfigure(1, weight=1)
+
+        verify_button = ttk.Button(container, text="Verificar Cable (Manual)", command=self.verificar_cable, style='success.TButton', padding=10)
+        verify_button.pack(pady=20)
+
+        self.result_text = tk.Text(container, height=15, width=80, wrap="word", font=("Courier New", 10), state=tk.DISABLED, relief="flat", bg="#f0f0f0")
+        self.result_text.pack(fill='both', expand=True, pady=10)
+
+        self.result_text.tag_configure("header", font=("Helvetica", 14, "bold"), foreground="#0056b3")
+        self.result_text.tag_configure("bold", font=("Courier New", 10, "bold"))
+        self.result_text.tag_configure("info", font=("Courier New", 10, "italic"), foreground="grey")
+        self.result_text.tag_configure("APROBADO", foreground="#28a745")
+        self.result_text.tag_configure("RECHAZADO", foreground="#dc3545")
+        self.result_text.tag_configure("NO ENCONTRADO", foreground="#fd7e14")
+        self.result_text.tag_configure("ERROR", foreground="#dc3545", font=("Courier New", 10, "bold"))
+        
+        # Tags dinámicos interactivos
+        self.result_text.tag_configure("ilrl_link", foreground="#0056b3", underline=True)
+        self.result_text.tag_bind("ilrl_link", "<Button-1>", lambda e: self.show_details_window("ilrl"))
+        self.result_text.tag_bind("ilrl_link", "<Enter>", lambda e: self.result_text.config(cursor="hand2"))
+        self.result_text.tag_bind("ilrl_link", "<Leave>", lambda e: self.result_text.config(cursor=""))
+        
+        self.result_text.tag_configure("geo_link", foreground="#0056b3", underline=True)
+        self.result_text.tag_bind("geo_link", "<Button-1>", lambda e: self.show_details_window("geo"))
+        self.result_text.tag_bind("geo_link", "<Enter>", lambda e: self.result_text.config(cursor="hand2"))
+        self.result_text.tag_bind("geo_link", "<Leave>", lambda e: self.result_text.config(cursor=""))
+
+        self.result_text.tag_configure("ilrl_file_link", foreground="#4682B4", underline=True)
+        self.result_text.tag_bind("ilrl_file_link", "<Button-1>", lambda e: self.open_file_location("ilrl"))
+        self.result_text.tag_bind("ilrl_file_link", "<Enter>", lambda e: self.result_text.config(cursor="hand2"))
+        self.result_text.tag_bind("ilrl_file_link", "<Leave>", lambda e: self.result_text.config(cursor=""))
+        
+        self.result_text.tag_configure("geo_file_link", foreground="#4682B4", underline=True)
+        self.result_text.tag_bind("geo_file_link", "<Button-1>", lambda e: self.open_file_location("geo"))
+        self.result_text.tag_bind("geo_file_link", "<Enter>", lambda e: self.result_text.config(cursor="hand2"))
+        self.result_text.tag_bind("geo_file_link", "<Leave>", lambda e: self.result_text.config(cursor=""))
+
+        self.result_text.tag_configure("final_status_large", font=("Courier New", 14, "bold"))
+        self.show_waiting_message()
+
+    def show_waiting_message(self):
+        self.result_text.config(state=tk.NORMAL)
+        self.result_text.delete(1.0, tk.END)
+        self.result_text.insert(tk.END, "Esperando un número de serie valido para UNIBOOT (13 dígitos)...", "info")
+        self.result_text.config(state=tk.DISABLED)
+
+    def _log_verification(self, log_data):
+        try:
+            conn = sqlite3.connect(self.app.config['db_path'])
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO cable_verifications (
+                    entry_date, serial_number, ot_number, overall_status,
+                    ilrl_status, ilrl_details, geo_status, geo_details
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                log_data['serial_number'], log_data['ot_number'], log_data['overall_status'],
+                log_data['ilrl_status'], json.dumps(log_data['ilrl_details']),
+                log_data['geo_status'], json.dumps(log_data['geo_details'])
+            ))
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            messagebox.showerror("Error BD", f"Error al registrar verificación Uniboot: {e}")
+
+    def verificar_cable_automatico(self, event=None):
+        serie_raw = self.serie_entry.get().strip()
+        ot_numero = self.ot_entry.get().strip()
+        
+        if re.match(r'J(R)?MO\d{13}', serie_raw, re.IGNORECASE):
+            numeros_serie = re.sub(r'[^0-9]', '', serie_raw)
+            if not ot_numero:
+                 self.ot_entry.insert(0, f"JMO-{numeros_serie[:9]}")
+            self.verificar_cable()
+        elif len(serie_raw) == 13 and serie_raw.isdigit():
+            self.verificar_cable()
+        else:
+            self.show_waiting_message()
+
+    def verificar_cable(self, event=None):
+        ot_numero = self.ot_entry.get().strip().upper()
+        serie_raw = self.serie_entry.get().strip()
+        
+        self.result_text.config(state=tk.NORMAL)
+        self.result_text.delete(1.0, tk.END)
+
+        if not ot_numero or not serie_raw:
+            self.result_text.insert(tk.END, "ERROR: Por favor ingrese OT y Número de Serie.", "ERROR")
+            self.result_text.config(state=tk.DISABLED)
+            return
+
+        serie_numerica = re.sub(r'[^0-9]', '', serie_raw)
+        
+        if len(serie_numerica) != 13:
+            messagebox.showerror("Formato Inválido", "El número de serie debe contener 13 dígitos.")
+            self.result_text.config(state=tk.DISABLED)
+            return
+
+        prefijo_serie = "JRMO-" if "JRMO" in serie_raw.upper() else "JMO-"
+        serie_cable = f"{prefijo_serie}{serie_numerica}"
+        
+        ot_parte_input = re.sub(r'[^0-9]', '', ot_numero)
+        serie_ot_parte = serie_numerica[:9]
+
+        if ot_parte_input != serie_ot_parte:
+            messagebox.showerror("Error", "La OT del N.S. no corresponde a la OT trabajada.")
+            self.result_text.config(state=tk.DISABLED)
+            return
+        
+        current_mode = self.app.cable_mode.get()
+        self.result_text.insert(tk.END, f"Verificando UNIBOOT {serie_cable} en OT {ot_numero} (Modo: {current_mode})...\n", "header")
+        self.result_text.insert(tk.END, "-"*60 + "\n\n")
+
+        # 1. IL/RL (Lógica LC/SC)
+        self.last_ilrl_result = self.buscar_y_procesar_ilrl_uniboot(ot_numero, serie_cable, current_mode)
+        
+        # 2. Geometría (Lógica Fanout)
+        self.last_geo_result = self.buscar_y_procesar_geo_uniboot(ot_numero, serie_cable)
+        
+        self.mostrar_resultado("IL/RL", self.last_ilrl_result)
+        self.mostrar_resultado("Geometría", self.last_geo_result)
+
+        final_status = "NO ENCONTRADO"
+        if self.last_ilrl_result['status'] not in ['NO ENCONTRADO', 'ERROR'] or self.last_geo_result['status'] not in ['NO ENCONTRADO', 'ERROR']:
+            if self.last_ilrl_result['status'] == 'APROBADO' and self.last_geo_result['status'] == 'APROBADO':
+                final_status = 'APROBADO'
+            else:
+                final_status = 'RECHAZADO'
+        
+        self.result_text.insert(tk.END, "\n" + "-"*60 + "\n")
+        self.result_text.insert(tk.END, "ESTADO FINAL: ", ("bold", "final_status_large"))
+        self.result_text.insert(tk.END, f"{final_status}\n", (final_status, "final_status_large"))
+        
+        if winsound:
+            try:
+                if final_status == "APROBADO": winsound.Beep(1200, 200)
+                elif final_status == "RECHAZADO": winsound.Beep(400, 500)
+            except: pass
+        
+        self.result_text.config(state=tk.DISABLED)
+        
+        log_data = {
+            'serial_number': serie_cable, 'ot_number': ot_numero, 'overall_status': final_status,
+            'ilrl_status': self.last_ilrl_result['status'], 'ilrl_details': self.last_ilrl_result,
+            'geo_status': self.last_geo_result['status'], 'geo_details': self.last_geo_result
+        }
+        self._log_verification(log_data)
+
+    def mostrar_resultado(self, tipo, resultado):
+        link_tag = "ilrl_link" if tipo == "IL/RL" else "geo_link"
+        file_link_tag = "ilrl_file_link" if tipo == "IL/RL" else "geo_file_link"
+
+        self.result_text.insert(tk.END, f"Análisis {tipo}:\n", "bold")
+        self.result_text.insert(tk.END, f"  Estado: ")
+        self.result_text.insert(tk.END, f"{resultado['status']}", (resultado['status'], link_tag))
+        
+        details = resultado['details']
+        if "Archivo:" in details:
+            details_text, file_text = details.rsplit("Archivo:", 1)
+            file_text = "Archivo:" + file_text
+            self.result_text.insert(tk.END, f"\n  Detalles: {details_text.strip()}")
+            self.result_text.insert(tk.END, f"\n  {file_text.strip()}", (file_link_tag)) 
+            self.result_text.insert(tk.END, "\n\n")
+        else:
+            self.result_text.insert(tk.END, f"\n  Detalles: {details}\n\n")
+
+    # ================== MÉTODOS HÍBRIDOS (LC/SC + FANOUT) ==================
+
+    def buscar_y_procesar_ilrl_uniboot(self, ot, serie, mode):
+        """Usa la lógica individual de LC/SC buscando los últimos 4 dígitos en la subcarpeta OK."""
+        ruta_base = self.app.config.get('ruta_base_ilrl_uniboot', '')
+        if not ruta_base or not os.path.isdir(ruta_base):
+            return {'status': 'ERROR', 'details': 'Ruta ILRL Uniboot no configurada.', 'raw_data': []}
+
+        serie_terminacion = serie[-4:]
+        candidatos = []
+        
+        # --- MODIFICACIÓN UNIBOOT: Obligamos a buscar específicamente en la subcarpeta "OK" ---
+        ruta_ot_ok = os.path.join(ruta_base, ot, "OK")
+        
+        if os.path.isdir(ruta_ot_ok):
+            for root, _, files in os.walk(ruta_ot_ok):
+                for f in files:
+                    if f.endswith('.xlsx') and not f.startswith('~$') and serie_terminacion in f:
+                        candidatos.append(os.path.join(root, f))
+
+        if not candidatos:
+            return {'status': 'NO ENCONTRADO', 'details': f'Ningún archivo con terminación "{serie_terminacion}" en la carpeta OK.', 'raw_data': []}
+        
+        archivo_a_procesar = max(candidatos, key=os.path.getmtime)
+        
+        try:
+            expected_count = 2 if mode == "Simplex" else 4
+            df = pd.read_excel(archivo_a_procesar, header=None)
+            rows = df.iloc[12:]
+            col7_vals = rows[7].dropna().astype(str).str.upper()
+            col8_vals = rows[8].dropna().astype(str).str.upper()
+            
+            result_col = 8 if col8_vals.isin(['PASS', 'FAIL']).sum() >= col7_vals.isin(['PASS', 'FAIL']).sum() else 7
+            results = rows[result_col].dropna().astype(str).str.upper().tolist()
+            valid_results = [r for r in results if r in ['PASS', 'FAIL']]
+            
+            if not valid_results: 
+                return {'status': 'RECHAZADO', 'details': 'No se encontraron mediciones.', 'raw_data': []}
+                
+            all_pass = all(r == 'PASS' for r in valid_results)
+            count_ok = len(valid_results) == expected_count
+            status = 'APROBADO' if all_pass and count_ok else 'RECHAZADO'
+            
+            details = f"{len(valid_results)}/{expected_count} mediciones encontradas."
+            if not count_ok: details += f" Se esperaban {expected_count} para modo {mode}."
+            if not all_pass: details += f" {valid_results.count('FAIL')} con FALLA."
+            details += f" Archivo: {os.path.basename(archivo_a_procesar)}"
+            
+            raw_data = [{'linea': i + 1, 'resultado': res} for i, res in enumerate(valid_results)]
+            return {'status': status, 'details': details, 'raw_data': raw_data, 'file_path': archivo_a_procesar}
+        except Exception as e:
+            return {'status': 'ERROR', 'details': f'Error ILRL: {e}', 'raw_data': []}
+
+    def buscar_y_procesar_geo_uniboot(self, ot_num, serie_buscada):
+        """Usa la lógica de Geometría de Fanout, extrayendo el Secuencial del lote y manejando Retrabajos (-R)."""
+        ruta_base = self.app.config.get('ruta_base_geo_uniboot', '') 
+        
+        if not ruta_base or not os.path.isdir(ruta_base):
+            return {'status': 'ERROR', 'details': 'Ruta de Geo Uniboot no configurada.', 'raw_data': []}
+
+        archivos_encontrados = [
+            os.path.join(ruta_base, f) for f in os.listdir(ruta_base) 
+            if str(ot_num) in f and f.lower().endswith(('.xlsx', '.xls')) and not f.startswith('~$')
+        ]
+
+        if not archivos_encontrados:
+            return {'status': 'NO ENCONTRADO', 'details': f'Sin archivo de Geometría Uniboot para OT {ot_num}.', 'raw_data': []}
+
+        archivo_a_procesar = max(archivos_encontrados, key=os.path.getmtime)
+        
+        # Extraemos los últimos 4 dígitos y los convertimos a entero para comparar numéricamente (ej. "0001" -> 1)
+        serie_numerica = re.sub(r'[^0-9]', '', serie_buscada)
+        secuencial_buscado = int(serie_numerica[-4:]) if len(serie_numerica) >= 4 else int(serie_numerica)
+
+        try:
+            df = pd.read_excel(archivo_a_procesar, sheet_name=0, header=None)
+            if len(df) <= 12:
+                return {'status': 'ERROR', 'details': 'El archivo tiene menos de 13 filas.', 'raw_data': []}
+                
+            df_datos = df.iloc[12:].copy()
+            
+            # Diccionario para fusionar retrabajos: { '1': {'id_original': '1-R', 'res': 'APROBADO', 'es_retrabajo': True} }
+            puntas_dict = {}
+
+            for index, row in df_datos.iterrows():
+                if len(row) < 9: continue
+                
+                row_sn = str(row[1]).strip() 
+                if row_sn.endswith('.0'): row_sn = row_sn[:-2]
+                
+                # Intentamos convertir la celda a entero para que "0001", "1.0" y "1" coincidan
+                try:
+                    row_sn_int = int(row_sn)
+                except ValueError:
+                    continue # Ignorar si la celda tiene texto basura
+                
+                if row_sn_int == secuencial_buscado:
+                    conector_id_original = str(row[2]).strip().upper()
+                    if conector_id_original.endswith('.0'): conector_id_original = conector_id_original[:-2]
+                    
+                    # Identificamos la base de la punta (ej. "1-R" -> "1")
+                    punta_base = conector_id_original.replace('-R', '').replace('R', '').strip()
+                    es_retrabajo = '-R' in conector_id_original or 'R' in conector_id_original
+                    
+                    res_punta = "RECHAZADO" if "FAIL" in str(row[8]).strip().upper() else "APROBADO"
+                    
+                    # --- LÓGICA DE PRIORIDAD (RETRABAJOS) ---
+                    if punta_base not in puntas_dict:
+                        puntas_dict[punta_base] = {'id_original': conector_id_original, 'res': res_punta, 'es_retrabajo': es_retrabajo}
+                    else:
+                        existente = puntas_dict[punta_base]
+                        # Si la nueva fila es retrabajo y la anterior no, sobrescribimos
+                        if es_retrabajo and not existente['es_retrabajo']:
+                            puntas_dict[punta_base] = {'id_original': conector_id_original, 'res': res_punta, 'es_retrabajo': es_retrabajo}
+                        # Si ambas son retrabajos o ambas normales, tomamos la última (asumiendo que se midió después)
+                        elif es_retrabajo == existente['es_retrabajo']:
+                            puntas_dict[punta_base] = {'id_original': conector_id_original, 'res': res_punta, 'es_retrabajo': es_retrabajo}
+
+            if not puntas_dict:
+                secuencial_str = f"{secuencial_buscado:04d}" # Regresamos los ceros para el mensaje
+                return {'status': 'NO ENCONTRADO', 'details': f'Secuencial {secuencial_str} no medido.', 'raw_data': []}
+
+            # Preparamos el veredicto final con las puntas definitivas
+            status_global = "APROBADO"
+            raw_data = []
+            
+            for punta_base, info in puntas_dict.items():
+                if info['res'] == "RECHAZADO":
+                    status_global = "RECHAZADO"
+                    
+                raw_data.append({
+                    'punta': f"Punta {info['id_original']}",
+                    'resultado': info['res'],
+                    'fuente': serie_buscada
+                })
+
+            details = f"Geometría Uniboot: {len(puntas_dict)} puntas medidas OK. Archivo: {os.path.basename(archivo_a_procesar)}"
+            return {'status': status_global, 'details': details, 'raw_data': raw_data, 'file_path': archivo_a_procesar}
+
+        except Exception as e:
+            return {'status': 'ERROR', 'details': f'Error Geo Uniboot: {e}', 'raw_data': []}
+
+    # ================== MÉTODOS DE VISUALIZACIÓN ==================
+    def show_details_window(self, analysis_type):
+        if analysis_type == "ilrl":
+            data = self.last_ilrl_result
+            title = "Detalles de Análisis IL/RL (Uniboot)"
+        else:
+            data = self.last_geo_result
+            title = "Detalles de Geometría (Uniboot)"
+            
+        if not data or not data.get('raw_data'):
+            messagebox.showinfo(title, "No hay datos detallados para mostrar.")
+            return
+            
+        data['serial_number'] = self.serie_entry.get().strip()
+        DetailsWindow(self, title, data, analysis_type)
+
+    def open_file_location(self, analysis_type):
+        data = self.last_ilrl_result if analysis_type == 'ilrl' else self.last_geo_result
+        if not data or not data.get('file_path'): return
+            
+        file_path = data['file_path']
+        if os.path.exists(file_path):
+            os.startfile(os.path.abspath(os.path.dirname(file_path)))
+        else:
+            messagebox.showerror("Error", f"La ruta no existe:\n{file_path}", parent=self)
+
 if __name__ == "__main__":
     app = App()
     app.mainloop()
-
