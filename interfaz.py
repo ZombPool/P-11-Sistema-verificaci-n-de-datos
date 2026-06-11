@@ -22,17 +22,106 @@ import sys
 import ctypes
 import psutil
 
+class LoginAuditorDialog(tk.Toplevel):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.title("Acceso a Calidad")
+        self.geometry("350x250")
+        self.resizable(False, False)
+        self.transient(parent)
+        self.grab_set()
+        self.result = None
+
+        # Centrar la ventana en la pantalla
+        self.update_idletasks()
+        x = parent.winfo_x() + (parent.winfo_width() // 2) - 175
+        y = parent.winfo_y() + (parent.winfo_height() // 2) - 125
+        self.geometry(f"+{x}+{y}")
+
+        ttk.Label(self, text="🔒 Área Restringida", font=("Helvetica", 14, "bold"), foreground="#2C3E50").pack(pady=(15, 5))
+
+        ttk.Label(self, text="Nombre del Auditor:", font=("Helvetica", 10, "bold")).pack(pady=(10, 2))
+        self.user_var = tk.StringVar()
+        self.user_entry = ttk.Entry(self, textvariable=self.user_var, font=("Helvetica", 11), width=25)
+        self.user_entry.pack()
+        self.user_entry.focus()
+
+        ttk.Label(self, text="Contraseña:", font=("Helvetica", 10, "bold")).pack(pady=(10, 2))
+        self.pass_var = tk.StringVar()
+        self.pass_entry = ttk.Entry(self, textvariable=self.pass_var, font=("Helvetica", 11), width=25, show="*")
+        self.pass_entry.pack()
+        
+        # Permitir entrar presionando la tecla Enter
+        self.pass_entry.bind("<Return>", lambda e: self.check_login())
+
+        ttk.Button(self, text="Ingresar", command=self.check_login, style='success.TButton').pack(pady=20)
+
+    def check_login(self):
+        user = self.user_var.get().strip()
+        password = self.pass_var.get()
+
+        if not user:
+            messagebox.showwarning("Error", "Por favor ingresa tu nombre.", parent=self)
+            return
+        if password != "Calidad2024":
+            messagebox.showerror("Acceso Denegado", "Contraseña incorrecta.", parent=self)
+            return
+
+        self.result = user # Guardamos el nombre del auditor
+        self.destroy()
+
+# =======================================================================================
+# ======================= MOTOR DE INTEGRACIÓN CLOUD (FEISHU / LARK) ====================
+# =======================================================================================
+class FeishuIntegrator:
+    def __init__(self, app_id, app_secret, app_token, table_id):
+        self.app_id = app_id
+        self.app_secret = app_secret
+        self.app_token = app_token
+        self.table_id = table_id
+        # NOTA: Si tu empresa usa la versión global es larksuite.com. Si es la versión china es feishu.cn
+        self.base_url = "https://open.feishu.cn/open-apis" # (Versión China)
+
+    def get_tenant_access_token(self):
+        url = f"{self.base_url}/auth/v3/tenant_access_token/internal"
+        payload = {"app_id": self.app_id, "app_secret": self.app_secret}
+        headers = {"Content-Type": "application/json; charset=utf-8"}
+        
+        response = requests.post(url, json=payload, headers=headers)
+        if response.status_code == 200 and response.json().get("code") == 0:
+            return response.json().get("tenant_access_token")
+        else:
+            raise Exception(f"Fallo de Autenticación Feishu: {response.text}")
+
+    def create_bitable_record(self, campos_dict):
+        token = self.get_tenant_access_token()
+        url = f"{self.base_url}/bitable/v1/apps/{self.app_token}/tables/{self.table_id}/records"
+        
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json; charset=utf-8"
+        }
+        
+        # Estructura requerida por la API de Feishu
+        payload = {"fields": campos_dict}
+        
+        response = requests.post(url, json=payload, headers=headers)
+        if response.status_code == 200 and response.json().get("code") == 0:
+            return True, "Registro creado exitosamente en Bitable."
+        else:
+            raise Exception(f"Error al escribir en Bitable: {response.text}")
+
 try:
     import winsound
 except ImportError:
     print("Librería 'winsound' no encontrada. No se reproducirán sonidos (solo disponible en Windows).")
     winsound = None
 
-__version__ = "1.2.31" # IMPORTANTE: Esta es la versión de tu script local
+__version__ = "1.2.33" # IMPORTANTE: Esta es la versión de tu script local
 
 # Reemplaza 'tu-usuario' y 'tu-repositorio' con los tuyos
 URL_VERSION = "https://raw.githubusercontent.com/ZombPool/P-11-Sistema-verificaci-n-de-datos/main/version.txt"
-URL_SCRIPT = "https://github.com/ZombPool/P-11-Sistema-verificaci-n-de-datos/releases/download/1.2.31/interfaz.exe"
+URL_SCRIPT = "https://github.com/ZombPool/P-11-Sistema-verificaci-n-de-datos/releases/download/1.2.33/interfaz.exe"
 # --- Dependencias Requeridas 
 # Intenta importar xlrd para archivos .xls (Geometría antigua)
 try:
@@ -664,6 +753,7 @@ class App(ttk.Window):
     def load_config(self):
         """Carga la configuración desde config.json o crea un archivo por defecto."""
         default_config = {
+            "linea_actual": "JWS1-1",  # <--- NUEVO: Identificador de la PC
             "ruta_base_ilrl": "C:\\Ruta\\Por\\Defecto\\ILRL_SC_LC",
             "ruta_base_ilrl_2": "", 
             "ruta_base_geo": "C:\\Ruta\\Por\\Defecto\\Geometria_SC_LC",
@@ -682,7 +772,10 @@ class App(ttk.Window):
             "check_mpo_geo": True,
             "check_mpo_polaridad": True,
             
-            "db_path": os.path.join(os.path.expanduser('~'), 'Documents', 'FibraTraceData', 'verifications.db')
+            "db_path": os.path.join(os.path.expanduser('~'), 'Documents', 'FibraTraceData', 'verifications.db'),
+            "db_path_jws1_1": "",
+            "db_path_jws1_2": "",
+            "db_path_jws1_3": ""
         }
         if os.path.exists(self.config_file):
             with open(self.config_file, 'r') as f:
@@ -724,6 +817,8 @@ class App(ttk.Window):
                 cursor.execute("ALTER TABLE cable_verifications ADD COLUMN polaridad_status TEXT")
             if 'polaridad_details' not in columns:
                 cursor.execute("ALTER TABLE cable_verifications ADD COLUMN polaridad_details TEXT")
+            if 'digital_seal' not in columns:
+                cursor.execute("ALTER TABLE cable_verifications ADD COLUMN digital_seal TEXT")
 
             # --- Tabla de Configuraciones de OT para MPO ---
             cursor.execute("""
@@ -800,8 +895,7 @@ class App(ttk.Window):
         
         crear_seccion("SC & LC", [
             ("Verificación Individual", "🔍", lambda: self.show_page("Verificacion_LC_SC")),
-            ("Análisis de O.T.", "📊", lambda: self.show_page("Reportes_LC_SC")),
-            ("Registro en Almacén", "📦", lambda: self.show_page("RegistroWH"))
+            ("Revisar Lote", "📦", lambda: self.show_page("RevisarLote_LC_SC"))
         ], incluir_switch=True)
 
         crear_seccion("MPO", [
@@ -817,7 +911,12 @@ class App(ttk.Window):
         ])
 
         crear_seccion("UNIBOOT", [
-            ("Verificación Individual", "🔍", lambda: self.show_page("VerificacionUniboot"))
+            ("Verificación Individual", "🔍", lambda: self.show_page("VerificacionUniboot")),
+        ])
+
+        crear_seccion("Herramientas del auditor", [
+            ("Buscar Sello Digital", "🔎", lambda: self.show_page("BuscadorSellos")),
+            ("Auditoría O.T. (LC/SC)", "📊", lambda: self.show_page("Auditoria_LC_SC"))
         ])
         
         # =====================================================================
@@ -850,25 +949,47 @@ class App(ttk.Window):
         self.page_title_label.pack(side='left')
 
     def create_pages(self):
-        self.pages["Dashboard"] = DashboardPage(self.main_frame)
+        self.pages["Dashboard"] = DashboardPage(self.main_frame, self) # <--- Pasamos self (app)
         self.pages["Verificacion_LC_SC"] = VerificacionLC_SC_Page(self.main_frame, self)
-        self.pages["Reportes_LC_SC"] = Reportes_LC_SC_Page(self.main_frame, self)
+        #self.pages["Reportes_LC_SC"] = Reportes_LC_SC_Page(self.main_frame, self)
+        self.pages["RevisarLote_LC_SC"] = RevisarLote_LC_SC_Page(self.main_frame, self)
         self.pages["Registros"] = RecordsPage(self.main_frame, self)
         self.pages["Verificacion_MPO"] = VerificacionMPO_Page(self.main_frame, self)
         self.pages["Reportes_MPO"] = AnalisisMPOPage(self.main_frame, self)
-        self.pages["RegistroWH"] = RegistroWH_Page(self.main_frame, self)
+        #self.pages["RegistroWH"] = RegistroWH_Page(self.main_frame, self)
         self.pages["RegistroWHMPO"] = RegistroWHMPO_Page(self.main_frame, self)
         self.pages["VerificacionFanout"] = VerificacionFanout_Page(self.main_frame, self)
         self.pages["ReportesFanout"] = AnalisisFanoutPage(self.main_frame, self)
         self.pages["RegistroWHFanout"] = RegistroWHFanout_Page(self.main_frame, self)
         self.pages["VerificacionUniboot"] = VerificacionUniboot_Page(self.main_frame, self)
+        self.pages["BuscadorSellos"] = BuscadorSellos_Page(self.main_frame, self)
+        self.pages["Auditoria_LC_SC"] = Auditoria_LC_SC_Page(self.main_frame, self)
 
     def show_page(self, page_name):
+        # --- NUEVO: CANDADO DE SEGURIDAD PARA HERRAMIENTAS DE CALIDAD ---
+        paginas_protegidas = ["Auditoria_LC_SC", "BuscadorSellos"] 
+        
+        if page_name in paginas_protegidas:
+            # Si el auditor no se ha logueado en esta sesión, le pedimos la contraseña
+            if not getattr(self, 'auditor_name', None):
+                dialog = LoginAuditorDialog(self)
+                self.wait_window(dialog)
+                
+                # Si cierra la ventana o falla, abortamos y no lo dejamos entrar
+                if not dialog.result:
+                    return 
+                
+                # Si es exitoso, guardamos su nombre en la memoria del programa
+                self.auditor_name = dialog.result
         title_map = {
             "Verificacion_LC_SC": "Verificación Individual (LC/SC)",
+            "RevisarLote_LC_SC": "Revisar Lote de Producción (LC/SC)",
             "Reportes_LC_SC": "Análisis de O.T. (LC/SC)",
             "Verificacion_MPO": "Verificación Individual (MPO)",
-            "Reportes_MPO": "Análisis de O.T. (MPO)"
+            "Reportes_MPO": "Análisis de O.T. (MPO)",
+            "VerificacionUniboot": "Verificación Individual (Uniboot)",
+            "BuscadorSellos": "Buscador de Sellos Digitales",
+            "Auditoria_LC_SC": "Auditoría Automática (LC/SC)"
         }
         display_title = title_map.get(page_name, page_name.replace("_", " "))
         self.page_title_label.config(text=display_title)
@@ -939,25 +1060,58 @@ class App(ttk.Window):
 # --- PÁGINAS DE LA APLICACIÓN ---
 
 class DashboardPage(ttk.Frame):
-    def __init__(self, parent):
+    def __init__(self, parent, app_instance):
         super().__init__(parent, padding=10)
+        self.app = app_instance
+        self.create_widgets()
 
-        # --- Contenido existente ---
-        ttk.Label(self, text="Bienvenido al Sistema de Trazabilidad FibraTrace.", font=("Helvetica", 16)).pack(pady=20)
-        ttk.Label(self, text="Selecciona una opción del menú de la izquierda para comenzar.", font=("Helvetica", 12)).pack(pady=10)
+    def create_widgets(self):
+        # --- AQUÍ ESTÁ LA CORRECCIÓN DEL PADDING ---
+        container = ttk.Frame(self, style='TFrame', padding=10)
+        container.pack(expand=True, fill='both')
 
-        # --- CÓDIGO AÑADIDO ---
-        # Creamos una etiqueta para mostrar la versión del programa.
-        # Usamos la variable global __version__ que ya tienes definida.
-        version_label = ttk.Label(
-            self,
-            text=f"Versión {__version__}",
-            font=("Helvetica", 10),
-            style='secondary.TLabel'  # Un estilo sutil (texto gris) de ttkbootstrap
-        )
-        # Usamos .pack() con side='bottom' para anclar la etiqueta a la parte inferior.
+        ttk.Label(container, text="Bienvenido al Sistema de Trazabilidad FibraTrace.", font=("Helvetica", 16)).pack(pady=20)
+        ttk.Label(container, text="Selecciona una opción del menú de la izquierda para comenzar.", font=("Helvetica", 12)).pack(pady=10)
+
+        # =========================================================================
+        # --- SECCIÓN: CONTROL DE VALIDACIONES (BYPASS TEMPORAL) ---
+        # =========================================================================
+        bypass_frame = ttk.LabelFrame(container, text="⚙️ Control de Validaciones en Línea (Bypass)", padding=15)
+        bypass_frame.pack(fill='x', pady=15, padx=10)
+
+        ttk.Label(bypass_frame, text="Desactive los interruptores para omitir temporalmente la medición y forzar un 'APROBADO' directo.", 
+                  font=("Helvetica", 10, "italic"), foreground="#555555").grid(row=0, column=0, columnspan=3, pady=(0, 10), sticky='w')
+
+        lineas = ["JWS1-1", "JWS1-2", "JWS1-3"]
+        
+        for idx, linea in enumerate(lineas):
+            linea_key = linea.lower().replace("-", "_")
+            frame_linea = ttk.Frame(bypass_frame)
+            frame_linea.grid(row=1, column=idx, padx=30, pady=5)
+            
+            ttk.Label(frame_linea, text=f"Línea {linea}", font=("Helvetica", 11, "bold")).pack(anchor='center', pady=(0, 5))
+            
+            # Variables de estado enlazadas a config
+            setattr(self, f"var_ilrl_{linea_key}", tk.BooleanVar(value=self.app.config.get(f'val_ilrl_{linea_key}', True)))
+            setattr(self, f"var_geo_{linea_key}", tk.BooleanVar(value=self.app.config.get(f'val_geo_{linea_key}', True)))
+            
+            var_ilrl = getattr(self, f"var_ilrl_{linea_key}")
+            var_geo = getattr(self, f"var_geo_{linea_key}")
+            
+            def guardar_cambios_bypass(k=linea_key, v_i=var_ilrl, v_g=var_geo):
+                self.app.config[f'val_ilrl_{k}'] = v_i.get()
+                self.app.config[f'val_geo_{k}'] = v_g.get()
+                self.app.save_config(self.app.config)
+            
+            chk_ilrl = ttk.Checkbutton(frame_linea, text="IL/RL (Activo)", variable=var_ilrl, bootstyle="success-round-toggle", command=guardar_cambios_bypass)
+            chk_ilrl.pack(anchor='w', pady=5)
+            
+            chk_geo = ttk.Checkbutton(frame_linea, text="Geometría (Activo)", variable=var_geo, bootstyle="success-round-toggle", command=guardar_cambios_bypass)
+            chk_geo.pack(anchor='w', pady=5)
+        # =========================================================================
+
+        version_label = ttk.Label(self, text=f"Versión {__version__}", font=("Helvetica", 10), style='secondary.TLabel')
         version_label.pack(side='bottom', pady=10, anchor='se')
-        # --------------------
 
 class VerificacionLC_SC_Page(ttk.Frame):
     def __init__(self, parent, app_instance):
@@ -982,6 +1136,13 @@ class VerificacionLC_SC_Page(ttk.Frame):
         self.serie_entry = ttk.Entry(input_frame, width=30, font=("Helvetica", 11))
         self.serie_entry.grid(row=1, column=1, sticky='ew', padx=5, pady=5)
         self.serie_entry.bind("<KeyRelease>", self.verificar_cable_automatico)
+        
+        # --- NUEVO SELECTOR SANA EN VERIFICACIÓN ---
+        ttk.Label(input_frame, text="Formato Geometría:", font=("Helvetica", 11, "bold")).grid(row=2, column=0, sticky='w', padx=5, pady=5)
+        self.sana_var = tk.StringVar(value="SANA 1.0")
+        sana_cb = ttk.Combobox(input_frame, textvariable=self.sana_var, values=["SANA 1.0", "SANA 2.0"], state="readonly", width=28, font=("Helvetica", 11))
+        sana_cb.grid(row=2, column=1, sticky='ew', padx=5, pady=5)
+        # -------------------------------------------
         
         input_frame.columnconfigure(1, weight=1)
 
@@ -1021,6 +1182,17 @@ class VerificacionLC_SC_Page(ttk.Frame):
         self.result_text.tag_configure("final_status_large", font=("Courier New", 14, "bold"))
         self.result_text.tag_configure("ilrl_link", foreground="#0056b3", underline=True)
 
+        # --- NUEVA SECCIÓN DE SCRAP ---
+        scrap_frame = ttk.LabelFrame(container, text="Registro de Scrap (Cables Dañados/Irreparables)", padding=15)
+        scrap_frame.pack(fill='x', pady=(10, 0))
+
+        ttk.Label(scrap_frame, text="N.S. a Scrapear (13 dígitos):", font=("Helvetica", 11, "bold")).grid(row=0, column=0, padx=5, pady=5)
+        self.scrap_entry = ttk.Entry(scrap_frame, width=25, font=("Helvetica", 11))
+        self.scrap_entry.grid(row=0, column=1, padx=5, pady=5)
+        
+        ttk.Button(scrap_frame, text="🗑️ Mandar a Scrap", command=self.mandar_a_scrap, style='danger.TButton').grid(row=0, column=2, padx=15, pady=5)
+        # ------------------------------
+
         self.show_waiting_message()
 
     def show_waiting_message(self):
@@ -1036,8 +1208,8 @@ class VerificacionLC_SC_Page(ttk.Frame):
             cursor.execute("""
                 INSERT INTO cable_verifications (
                     entry_date, serial_number, ot_number, overall_status,
-                    ilrl_status, ilrl_details, geo_status, geo_details
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ilrl_status, ilrl_details, geo_status, geo_details, digital_seal
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 log_data['serial_number'],
@@ -1046,14 +1218,13 @@ class VerificacionLC_SC_Page(ttk.Frame):
                 log_data['ilrl_status'],
                 json.dumps(log_data['ilrl_details']),
                 log_data['geo_status'],
-                json.dumps(log_data['geo_details'])
+                json.dumps(log_data['geo_details']),
+                log_data.get('digital_seal', 'N/A') # <--- Guardado en BD
             ))
             conn.commit()
             conn.close()
         except Exception as e:
             messagebox.showerror("Error de Base de Datos", f"No se pudo registrar la verificación: {e}")
-
-    # En la clase VerificacionLC_SC_Page, reemplaza este método:
 
     def verificar_cable_automatico(self, event=None):
         serie_raw = self.serie_entry.get().strip()
@@ -1072,6 +1243,69 @@ class VerificacionLC_SC_Page(ttk.Frame):
             self.verificar_cable()
         else:
             self.show_waiting_message()
+    
+    def mandar_a_scrap(self):
+        serie_raw = self.scrap_entry.get().strip()
+        
+        # 1. Limpieza y validación de los 13 dígitos
+        serie_numerica = re.sub(r'[^0-9]', '', serie_raw)
+
+        if len(serie_numerica) != 13:
+            messagebox.showerror("Formato Inválido", "El número de serie debe contener exactamente 13 dígitos para enviarse a Scrap.", parent=self)
+            return
+
+        # 2. Reconstrucción automática (Detectar OT a partir del N.S.)
+        prefijo_serie = "JRMO-" if "JRMO" in serie_raw.upper() else "JMO-"
+        serie_completa = f"{prefijo_serie}{serie_numerica}"
+        ot_completa = f"JMO-{serie_numerica[:9]}" # Extraemos los primeros 9 dígitos para la O.T.
+
+        # 3. Ventana de Advertencia (Poka-Yoke)
+        confirmacion = messagebox.askyesno(
+            "⚠️ Advertencia Crítica de Scrap",
+            f"Estás a punto de catalogar el cable:\n\n{serie_completa}\n\ncomo SCRAP (Dañado/Irreparable).\n\n¿Estás completamente seguro de realizar esta acción?",
+            parent=self,
+            icon='warning'
+        )
+
+        if not confirmacion:
+            return
+
+        # 4. Registrar en la Base de Datos simulando el formato estándar (COMO PENDIENTE)
+        log_data = {
+            'serial_number': serie_completa,
+            'ot_number': ot_completa,
+            'overall_status': 'SCRAP PENDIENTE',
+            'ilrl_status': 'N/A (SCRAP PENDIENTE)',
+            'ilrl_details': {'status': 'SCRAP PENDIENTE', 'details': 'Pendiente de confirmación por Calidad.', 'raw_data': []},
+            'geo_status': 'N/A (SCRAP PENDIENTE)',
+            'geo_details': {'status': 'SCRAP PENDIENTE', 'details': 'Pendiente de confirmación por Calidad.', 'raw_data': []},
+            'digital_seal': serie_completa
+        }
+
+        self._log_verification(log_data)
+
+        # 5. Mostrar confirmación visual en la pantalla principal
+        self.result_text.config(state=tk.NORMAL)
+        self.result_text.delete(1.0, tk.END)
+        self.result_text.insert(tk.END, f"Registro de SCRAP Exitoso\n", "header")
+        self.result_text.insert(tk.END, "-"*70 + "\n\n")
+        self.result_text.insert(tk.END, f"El cable {serie_completa} (perteneciente a la {ot_completa}) ha sido marcado como dañado y guardado en la Base de Datos.\n\n")
+        
+        self.result_text.insert(tk.END, "ESTADO FINAL: ", ("bold", "final_status_large"))
+        self.result_text.insert(tk.END, "SCRAP\n", ("ERROR", "final_status_large")) # Usa el color rojo de ERROR
+        self.result_text.insert(tk.END, f"SELLO DIGITAL:  {serie_completa}\n", "header")
+        self.result_text.config(state=tk.DISABLED)
+
+        # Limpiamos el recuadro para el siguiente cable
+        self.scrap_entry.delete(0, tk.END)
+        
+        # Alerta sonora distinta (más grave y larga) para Scrap
+        if winsound:
+            try:
+                winsound.Beep(300, 800)
+            except: pass
+            
+        messagebox.showinfo("Scrap Registrado", f"El cable {serie_completa} se ha enviado a Scrap correctamente.", parent=self)
 
     # En la clase VerificacionLC_SC_Page, reemplaza este método:
 
@@ -1100,7 +1334,6 @@ class VerificacionLC_SC_Page(ttk.Frame):
         serie_cable = f"{prefijo_serie}{serie_numerica}"
         
         # 3. Validación de coincidencia OT
-        # Quitamos JMO/JRMO de la OT input para comparar solo números
         ot_parte_input = re.sub(r'[^0-9]', '', ot_numero)
         serie_ot_parte = serie_numerica[:9]
 
@@ -1108,18 +1341,68 @@ class VerificacionLC_SC_Page(ttk.Frame):
             messagebox.showerror("Error de Coincidencia", "La OT del número de serie no corresponde a la OT trabajada.")
             self.result_text.config(state=tk.DISABLED)
             return
-        
+
+        # =========================================================================
+        # 4. NUEVA VALIDACIÓN POKA-YOKE: COMPROBAR SI EL CABLE ESTÁ EN SCRAP
+        # =========================================================================
+        try:
+            conn = sqlite3.connect(self.app.config['db_path'], timeout=10)
+            cursor = conn.cursor()
+            # Buscamos el último registro de este cable en la Base de Datos
+            cursor.execute("""
+                SELECT overall_status FROM cable_verifications 
+                WHERE serial_number LIKE ? OR digital_seal LIKE ? 
+                ORDER BY id DESC LIMIT 1
+            """, (f"%{serie_numerica}%", f"%{serie_numerica}%"))
+            registro_previo = cursor.fetchone()
+            conn.close()
+
+            if registro_previo and registro_previo[0] == 'SCRAP':
+                self.result_text.insert(tk.END, f"⚠️ ALERTA: EL CABLE {serie_cable} ESTÁ EN SCRAP ⚠️\n", "ERROR")
+                self.result_text.insert(tk.END, "-"*60 + "\n\n")
+                self.result_text.insert(tk.END, "Este número de serie fue marcado previamente como DAÑADO/IRREPARABLE.\nNo se puede volver a verificar ni procesar.\n\n", "bold")
+                
+                self.result_text.insert(tk.END, "ESTADO FINAL: ", ("bold", "final_status_large"))
+                self.result_text.insert(tk.END, "SCRAP\n", ("ERROR", "final_status_large"))
+                self.result_text.config(state=tk.DISABLED)
+                
+                if winsound:
+                    try:
+                        winsound.Beep(300, 800) # Sonido grave de advertencia
+                    except: pass
+                    
+                messagebox.showerror("Cable Bloqueado", f"El cable {serie_cable} ya ha sido reportado como SCRAP en la base de datos.", parent=self)
+                return # Abortamos la verificación aquí mismo
+        except Exception as e:
+            print(f"Error comprobando estado de scrap en BD: {e}")
+        # =========================================================================
+
         current_mode = self.app.cable_mode.get()
         self.result_text.insert(tk.END, f"Verificando cable {serie_cable} en OT {ot_numero} (Modo: {current_mode})...\n", "header")
         self.result_text.insert(tk.END, "-"*60 + "\n\n")
 
-        # Pasamos el serie_cable (que puede ser JRMO-...) a las funciones
-        self.last_ilrl_result = self.buscar_y_procesar_ilrl(ot_numero, serie_cable, current_mode)
-        self.last_geo_result = self.buscar_y_procesar_geo(ot_numero, serie_cable, current_mode)
+        # =========================================================================
+        # --- FILTRO DE BYPASS SEGÚN DASHBOARD ---
+        # =========================================================================
+        linea_pc = self.app.config.get('linea_actual', 'JWS1-1').lower().replace("-", "_")
+        val_ilrl_activa = self.app.config.get(f'val_ilrl_{linea_pc}', True)
+        val_geo_activa = self.app.config.get(f'val_geo_{linea_pc}', True)
+
+        if val_ilrl_activa:
+            self.last_ilrl_result = self.buscar_y_procesar_ilrl(ot_numero, serie_cable, current_mode)
+        else:
+            self.last_ilrl_result = {'status': 'APROBADO', 'details': 'BYPASS ACTIVO: Omitido desde Dashboard.', 'raw_data': []}
+
+        if val_geo_activa:
+            self.last_geo_result = self.buscar_y_procesar_geo(ot_numero, serie_cable, current_mode)
+        else:
+            self.last_geo_result = {'status': 'APROBADO', 'details': 'BYPASS ACTIVO: Omitido desde Dashboard.', 'raw_data': []}
+        # =========================================================================
         
         self.mostrar_resultado("IL/RL", self.last_ilrl_result)
         self.mostrar_resultado("Geometría", self.last_geo_result)
 
+        # --- Semáforo Final ---
         final_status = "NO ENCONTRADO"
         if self.last_ilrl_result['status'] not in ['NO ENCONTRADO', 'ERROR'] or self.last_geo_result['status'] not in ['NO ENCONTRADO', 'ERROR']:
             if self.last_ilrl_result['status'] == 'APROBADO' and self.last_geo_result['status'] == 'APROBADO':
@@ -1127,9 +1410,15 @@ class VerificacionLC_SC_Page(ttk.Frame):
             else:
                 final_status = 'RECHAZADO'
         
+        # --- CREACIÓN DEL SELLO DIGITAL ---
+        sello_digital = serie_cable
+        
         self.result_text.insert(tk.END, "\n" + "-"*60 + "\n")
         self.result_text.insert(tk.END, "ESTADO FINAL: ", ("bold", "final_status_large"))
         self.result_text.insert(tk.END, f"{final_status}\n", (final_status, "final_status_large"))
+        
+        self.result_text.insert(tk.END, f"SELLO DIGITAL:  {sello_digital}\n", "header")
+        self.result_text.insert(tk.END, "-"*60 + "\n")
         
         if winsound:
             try:
@@ -1149,11 +1438,10 @@ class VerificacionLC_SC_Page(ttk.Frame):
             'ilrl_status': self.last_ilrl_result['status'],
             'ilrl_details': self.last_ilrl_result,
             'geo_status': self.last_geo_result['status'],
-            'geo_details': self.last_geo_result
+            'geo_details': self.last_geo_result,
+            'digital_seal': sello_digital 
         }
         self._log_verification(log_data)
-
-    # En la clase VerificacionLC_SC_Page, reemplaza este método:
 
     def mostrar_resultado(self, tipo, resultado):
         link_tag = "ilrl_link" if tipo == "IL/RL" else "geo_link"
@@ -1221,17 +1509,15 @@ class VerificacionLC_SC_Page(ttk.Frame):
         for ruta_base in rutas_base:
             if not os.path.isdir(ruta_base): continue
             
-            # Buscamos archivos que contengan el número de OT en el nombre
+            # Buscamos TODOS los archivos que contengan el número de OT en el nombre
             encontrados = [os.path.join(ruta_base, f) for f in os.listdir(ruta_base) 
                            if f.lower().endswith(('.xlsx', '.xls')) 
                            and not f.startswith('~$') 
                            and ot in f]
             
             if encontrados:
-                # De cada ruta, nos interesa el archivo más reciente de esa OT 
-                # (Por si hay versiones viejas en la misma carpeta)
-                archivo_reciente_ruta = max(encontrados, key=os.path.getmtime)
-                archivos_candidatos.append(archivo_reciente_ruta)
+                # --- NUEVO: En lugar de tomar solo el más reciente, tomamos TODOS ---
+                archivos_candidatos.extend(encontrados)
 
         if not archivos_candidatos:
             return {'status': 'NO ENCONTRADO', 'details': f'Ningún archivo para la OT "{ot}" en las rutas configuradas.', 'raw_data': []}
@@ -1404,54 +1690,59 @@ class VerificacionLC_SC_Page(ttk.Frame):
     def procesar_multiples_archivos_geo(self, lista_archivos, serie_objetivo, mode):
         try:
             puntas_requeridas = ['1', '2'] if mode == "Simplex" else ['1', '2', '3', '4']
-            
-            # Regex para extraer datos del nombre en Excel (igual que antes)
-            def normalize_serial_geo(s):
-                if not isinstance(s, str): return "", ""
-                s_upper = s.strip().upper()
-                match = re.search(r'(J(?:R)?MO-?\d{13}|\d{13})(-?([1-4R][1-4]?))?', s_upper)
-                if match:
-                    base_serial_raw = match.group(1)
-                    base_serial_numeric = re.sub(r'[^0-9]', '', base_serial_raw)
-                    punta = match.group(3) if match.group(3) else "N/A"
-                    return base_serial_numeric, punta
-                
-                fallback_match = re.search(r'(\d{13})', s_upper)
-                if fallback_match:
-                     return fallback_match.group(1), "N/A"
-                return "", "N/A"
+            sana_version = self.sana_var.get() # <--- Capturamos versión SANA
 
             serie_objetivo_norm = re.sub(r'[^0-9]', '', serie_objetivo)
+            ot_completa = f"JMO-{serie_objetivo_norm[:9]}" 
+            secuencial_buscado = serie_objetivo_norm[-4:] 
             
-            # Contenedores para la fusión de datos
-            todas_mediciones = [] # Lista cruda para logs
-            puntas_encontradas_map = {} # Diccionario para lógica de prioridad (Punta -> Info)
-
+            todas_mediciones = [] 
+            puntas_encontradas_map = {} 
             archivos_usados = set()
 
-            # --- ITERAR SOBRE CADA ARCHIVO ENCONTRADO (JWS1-1, JWS1-2, etc.) ---
             for ruta in lista_archivos:
                 try:
                     df = pd.read_excel(ruta, header=None, skiprows=12)
                     
                     for _, row in df.iterrows():
-                        raw_serial_numeric, punta = normalize_serial_geo(str(row[0]))
+                        if len(row) < 9: continue
+
+                        # --- NUEVA BIFURCACIÓN INTELIGENTE (Auto-detección) ---
+                        s_upper = str(row[0]).strip().upper()
                         
-                        # Si coincide el número de serie y la punta es válida
-                        if serie_objetivo_norm == raw_serial_numeric and punta != "N/A":
+                        # 1er Intento: Formato SANA 1.0
+                        match_sana1 = re.search(r'(J(?:R)?MO-?\d{13}|\d{13})(-?([1-4R][1-4]?))?', s_upper)
+                        
+                        if match_sana1 and match_sana1.group(3):
+                            base_serial_numeric = re.sub(r'[^0-9]', '', match_sana1.group(1))
+                            punta_original = match_sana1.group(3)
+                            fuente_texto = s_upper
+                            resultado_raw = str(row[6]).upper() if len(row) > 6 and pd.notna(row[6]) else "FAIL"
                             
-                            resultado = str(row[6]).upper() if len(row) > 6 and pd.notna(row[6]) else "SIN_DATO"
-                            fecha_raw = row[3] if len(row) > 3 else None # Intentar capturar fecha si existe columna
+                        # 2do Intento: Formato SANA 2.0
+                        elif ot_completa in s_upper:
+                            sec_raw = re.sub(r'[^0-9]', '', str(row[1]).strip())
+                            if not sec_raw: continue
+                            base_serial_numeric = serie_objetivo_norm[:9] + sec_raw.zfill(4)
+                            punta_original = str(row[2]).strip().upper()
+                            fuente_texto = f"{s_upper} {sec_raw}"
+                            resultado_raw = str(row[8]).upper() if len(row) > 8 and pd.notna(row[8]) else "FAIL"
                             
-                            # Normalizamos punta (quitar R para comparar prioridades)
-                            punta_limpia = punta.replace('R', '')
-                            es_retrabajo = 'R' in punta
+                        else:
+                            continue # Si no es ningún formato, pasamos a la siguiente fila
+                        # --------------------------------------------------------
+
+                        if serie_objetivo_norm == base_serial_numeric and punta_original != "N/A":
+                            resultado = "PASS" if "PASS" in resultado_raw else "FAIL"
+                            
+                            punta_limpia = punta_original.replace('R', '').replace('-', '')
+                            es_retrabajo = 'R' in punta_original
 
                             datos_medicion = {
-                                'punta_original': punta,
+                                'punta_original': punta_original,
                                 'punta_limpia': punta_limpia,
                                 'resultado': resultado,
-                                'fuente': str(row[0]),
+                                'fuente': fuente_texto,
                                 'archivo': os.path.basename(ruta),
                                 'es_retrabajo': es_retrabajo
                             }
@@ -1459,26 +1750,17 @@ class VerificacionLC_SC_Page(ttk.Frame):
                             todas_mediciones.append(datos_medicion)
                             archivos_usados.add(os.path.basename(ruta))
 
-                            # --- LÓGICA DE FUSIÓN (Merge) ---
-                            # Si ya tenemos esta punta, ¿la reemplazamos?
-                            # Prioridad: Retrabajo (R) > Normal
-                            # Si ambos son R o ambos Normales, el último leído (suponiendo orden de archivos)
-                            # Idealmente usaríamos fecha, pero aquí asumimos que R mata a normal.
-                            
                             if punta_limpia not in puntas_encontradas_map:
                                 puntas_encontradas_map[punta_limpia] = datos_medicion
                             else:
                                 existente = puntas_encontradas_map[punta_limpia]
-                                # Si el nuevo es Retrabajo y el viejo no, reemplazamos
                                 if es_retrabajo and not existente['es_retrabajo']:
                                     puntas_encontradas_map[punta_limpia] = datos_medicion
-                                # Si ambos son iguales en prioridad, actualizamos (asumiendo lectura secuencial o fechas en el futuro)
                                 elif es_retrabajo == existente['es_retrabajo']:
                                     puntas_encontradas_map[punta_limpia] = datos_medicion
 
                 except Exception as e:
                     print(f"Error leyendo archivo {ruta}: {e}")
-                    # Continuamos con el siguiente archivo si uno falla
 
             # --- EVALUACIÓN FINAL ---
             if not puntas_encontradas_map:
@@ -1497,17 +1779,10 @@ class VerificacionLC_SC_Page(ttk.Frame):
             pass_count = sum(1 for p in puntas_requeridas if p in puntas_encontradas_map and puntas_encontradas_map[p]['resultado'] == 'PASS')
             
             details = f"{pass_count}/{len(puntas_requeridas)} puntas OK."
-            if missing_puntas:
-                details += f" Faltan: {', '.join(missing_puntas)}."
+            if missing_puntas: details += f" Faltan: {', '.join(missing_puntas)}."
+            details += f" Fuentes: {', '.join(list(archivos_usados))}"
             
-            # Listar archivos fuente
-            archivos_str = ", ".join(list(archivos_usados))
-            details += f" Fuentes: {archivos_str}"
-            
-            # Formatear raw_data para mostrar en la ventana de detalles
             raw_data_formatted = [{'punta': m['punta_original'], 'resultado': m['resultado'], 'fuente': f"{m['fuente']} ({m['archivo']})"} for m in todas_mediciones]
-
-            # Usamos la ruta del primer archivo encontrado para "abrir ubicación" si el usuario hace click
             ruta_principal = lista_archivos[0] if lista_archivos else ""
 
             return {'status': status, 'details': details, 'raw_data': raw_data_formatted, 'file_path': ruta_principal}
@@ -1568,201 +1843,6 @@ class RegistroWHMPO_Page(ttk.Frame):
                 )
         except Exception as e:
             messagebox.showerror("Error", f"Ocurrió un error al intentar abrir el archivo:\n\n{e}")
-
-# Coloca esta nueva clase junto a las otras clases de páginas (ej. después de DetailsWindow)
-
-class RegistroWH_Page(ttk.Frame):
-    def __init__(self, parent, app_instance):
-        super().__init__(parent, padding=20)
-        self.app = app_instance
-
-        # --- Creamos los widgets para esta página ---
-        container = ttk.Frame(self, style='TFrame')
-        container.pack(expand=True, fill='both', pady=20)
-
-        # Un texto descriptivo
-        ttk.Label(
-            container,
-            text="Módulo de Registro en Almacén (WH)",
-            font=("Helvetica", 16, "bold")
-        ).pack(pady=10)
-
-        ttk.Label(
-            container,
-            text="Presiona el botón para abrir el archivo de registro de series para empaque.",
-            font=("Helvetica", 11),
-            wraplength=500  # Ajusta el texto si la ventana es estrecha
-        ).pack(pady=10)
-
-        # El botón que abrirá el archivo de Excel
-        open_button = ttk.Button(
-            container,
-            text="Abrir Registro WH (MP1RegistroWH.xlsm)",
-            command=self.abrir_registro, # Llama a la función de abajo
-            style='success.TButton',
-            padding=15
-        )
-        open_button.pack(pady=30)
-
-    def abrir_registro(self):
-        """
-        Encuentra y abre el archivo MP1RegistroWH.xlsm que está en la misma
-        carpeta que el ejecutable del programa.
-        """
-        try:
-            # sys.argv[0] nos da la ruta del script o del .exe
-            # os.path.dirname() nos da la carpeta que lo contiene
-            base_path = os.path.dirname(sys.argv[0])
-
-            # Construimos la ruta completa al archivo de Excel
-            file_path = os.path.join(base_path, "MP1RegistroWH.xlsm")
-
-            if os.path.exists(file_path):
-                # os.startfile es la forma recomendada en Windows para abrir un archivo
-                # con su programa predeterminado (en este caso, Excel).
-                os.startfile(file_path)
-            else:
-                # Si no encuentra el archivo, avisa al usuario.
-                messagebox.showerror(
-                    "Archivo no Encontrado",
-                    f"No se pudo encontrar el archivo 'MP1RegistroWH.xlsm'.\n\nAsegúrate de que esté en la misma carpeta que el programa."
-                )
-        except Exception as e:
-            messagebox.showerror("Error", f"Ocurrió un error al intentar abrir el archivo:\n\n{e}")
-
-# --- PÁGINA PARA REPORTES DE O.T. (LC/SC) ---
-class Reportes_LC_SC_Page(ttk.Frame):
-    def __init__(self, parent, app_instance):
-        super().__init__(parent, padding=20)
-        self.app = app_instance
-        self.analisis_ilrl = AnalisisILRL()
-        self.analisis_geo = AnalisisGEO()
-        self.create_widgets()
-
-    def create_widgets(self):
-        container = ttk.Frame(self, style='TFrame')
-        container.pack(expand=True, fill='both')
-
-        config_frame = ttk.LabelFrame(container, text="Parámetros del Análisis", padding=15)
-        config_frame.pack(fill='x', pady=(0, 20))
-        config_frame.columnconfigure(1, weight=1)
-
-        # ILRL Folder
-        ttk.Label(config_frame, text="Carpeta O.T. (para ILRL):", font="-weight bold").grid(row=0, column=0, sticky='w', pady=5, padx=5)
-        self.folder_path_var = tk.StringVar()
-        folder_entry = ttk.Entry(config_frame, textvariable=self.folder_path_var, state="readonly", width=70)
-        folder_entry.grid(row=0, column=1, sticky='ew', pady=5, padx=5)
-        ttk.Button(config_frame, text="Seleccionar Carpeta...", command=self.select_folder, style='outline.TButton').grid(row=0, column=2, sticky='w', pady=5, padx=5)
-        
-        # GEO File
-        ttk.Label(config_frame, text="Archivo Geometría:", font="-weight bold").grid(row=1, column=0, sticky='w', pady=5, padx=5)
-        self.geo_file_path_var = tk.StringVar()
-        geo_file_entry = ttk.Entry(config_frame, textvariable=self.geo_file_path_var, state="readonly", width=70)
-        geo_file_entry.grid(row=1, column=1, sticky='ew', pady=5, padx=5)
-        ttk.Button(config_frame, text="Seleccionar Archivo...", command=self.select_geo_file, style='outline.TButton').grid(row=1, column=2, sticky='w', pady=5, padx=5)
-
-        ttk.Separator(config_frame, orient='horizontal').grid(row=2, column=0, columnspan=3, sticky='ew', pady=10)
-
-        # OT and Quantity
-        ttk.Label(config_frame, text="Número de O.T.:", font="-weight bold").grid(row=3, column=0, sticky='w', pady=5, padx=5)
-        self.ot_var = tk.StringVar()
-        ttk.Entry(config_frame, textvariable=self.ot_var).grid(row=3, column=1, sticky='w', pady=5, padx=5)
-
-        ttk.Label(config_frame, text="Total de cables esperados:", font="-weight bold").grid(row=4, column=0, sticky='w', pady=5, padx=5)
-        self.total_cables_var = tk.StringVar()
-        ttk.Entry(config_frame, textvariable=self.total_cables_var).grid(row=4, column=1, sticky='w', pady=5, padx=5)
-
-        action_frame = ttk.Frame(container)
-        action_frame.pack(fill='x', pady=10)
-        ttk.Button(action_frame, text="Generar Reporte IL/RL", command=lambda: self.run_analysis("ilrl"), style='success.TButton', padding=10).pack(side='left', padx=10, expand=True)
-        ttk.Button(action_frame, text="Generar Reporte Geometría", command=lambda: self.run_analysis("geo"), style='success.TButton', padding=10).pack(side='left', padx=10, expand=True)
-
-        result_frame = ttk.LabelFrame(container, text="Estado del Análisis", padding=15)
-        result_frame.pack(fill='both', expand=True, pady=(20, 0))
-        self.progress_bar = ttk.Progressbar(result_frame, mode='determinate')
-        self.progress_bar.pack(fill='x', pady=10)
-        self.result_label = ttk.Label(result_frame, text="Listo para iniciar el análisis.", wraplength=700)
-        self.result_label.pack(fill='x', pady=10)
-
-    def select_folder(self):
-        folder_selected = filedialog.askdirectory()
-        if folder_selected:
-            self.folder_path_var.set(folder_selected)
-            match = re.search(r'JMO-(\d{9})', folder_selected, re.IGNORECASE)
-            if match:
-                self.ot_var.set(match.group(1))
-    
-    def select_geo_file(self):
-        file_selected = filedialog.askopenfilename(
-            title="Seleccionar archivo de Geometría",
-            filetypes=[("Excel files", "*.xlsx *.xls")]
-        )
-        if file_selected:
-            self.geo_file_path_var.set(file_selected)
-            # Intentar autodetectar la OT del nombre del archivo también
-            match = re.search(r'JMO-(\d{9})', os.path.basename(file_selected), re.IGNORECASE)
-            if match and not self.ot_var.get():
-                self.ot_var.set(match.group(1))
-
-    def run_analysis(self, analysis_type):
-        ot = self.ot_var.get().strip()
-        total_str = self.total_cables_var.get().strip()
-        
-        # Validación
-        if not ot:
-            messagebox.showerror("Error", "Por favor, ingresa el número de O.T.", parent=self)
-            return
-        if not total_str.isdigit() or int(total_str) <= 0:
-            messagebox.showerror("Error", "Por favor, ingresa un número válido para el total de cables.", parent=self)
-            return
-            
-        total = int(total_str)
-        
-        self.progress_bar["value"] = 0
-        self.result_label.config(text=f"Iniciando análisis de {analysis_type.upper()}...")
-        
-        # Ahora pasamos la configuración completa (self.app.config) a los threads
-        if analysis_type == "ilrl":
-            thread = threading.Thread(target=self._run_ilrl_thread, args=(ot, self.app.config, total), daemon=True)
-        else: # geo
-            thread = threading.Thread(target=self._run_geo_thread, args=(ot, self.app.config, total), daemon=True)
-        
-        thread.start()
-
-    def _run_ilrl_thread(self, ot, config, total):
-        try:
-            # Llamamos al nuevo método procesar_ilrl que usa rutas automáticas
-            ruta, errores = self.analisis_ilrl.procesar_ilrl(ot, config, total, self.update_progress)
-            self.after(0, self.show_result, ruta, errores, "IL/RL")
-        except Exception:
-            self.after(0, self.show_result, None, f"Error crítico en el análisis IL/RL:\n{traceback.format_exc()}", "IL/RL")
-
-    def _run_geo_thread(self, ot, config, total):
-        try:
-            current_mode = self.app.cable_mode.get()
-            # Llamamos al nuevo método procesar_geo que busca en múltiples rutas
-            ruta, errores = self.analisis_geo.procesar_geo(ot, config, total, self.update_progress, mode=current_mode)
-            self.after(0, self.show_result, ruta, errores, "Geometría")
-        except Exception:
-            self.after(0, self.show_result, None, f"Error crítico en el análisis de Geometría:\n{traceback.format_exc()}", "Geometría")
-
-    def update_progress(self, value):
-        self.progress_bar["value"] = value
-
-    def show_result(self, ruta_generada, errores, tipo_analisis):
-        self.progress_bar["value"] = 100
-        if ruta_generada:
-            self.result_label.config(text=f"Reporte de {tipo_analisis} generado con éxito.")
-            if messagebox.askyesno("Éxito", f"Reporte de {tipo_analisis} generado con éxito.\n\n"
-                                          f"Guardado en:\n{ruta_generada}\n\n"
-                                          "¿Deseas abrir el archivo ahora?", parent=self):
-                self.analisis_ilrl.abrir_archivo(ruta_generada)
-        else:
-            self.result_label.config(text=f"El análisis de {tipo_analisis} falló.")
-            messagebox.showerror("Análisis Fallido", f"No se pudo generar el reporte de {tipo_analisis}.\n\n"
-                                                   f"Detalles:\n{errores}", parent=self)
-        if errores and ruta_generada:
-             messagebox.showwarning("Advertencia", f"El reporte se generó, pero se encontraron los siguientes problemas:\n\n{errores}", parent=self)
 
 # --- PÁGINA PARA ANÁLISIS DE O.T. (MPO) ---
 class AnalisisMPOPage(ttk.Frame):
@@ -2739,7 +2819,7 @@ class SettingsWindow(tk.Toplevel):
         super().__init__(app_instance)
         self.app = app_instance
         self.title("Configurar Rutas")
-        self.geometry("800x650") # Ajustado para más espacio
+        self.geometry("800x750") # Aumentamos la altura a 750 para que quepan las nuevas BD
         self.transient(self.app)
         self.grab_set()
 
@@ -2826,14 +2906,40 @@ class SettingsWindow(tk.Toplevel):
 
         ttk.Separator(frame).grid(row=17, column=0, columnspan=3, pady=10, sticky='ew')
 
-        # --- Base de Datos ---
-        ttk.Label(frame, text="Ruta Base de Datos:").grid(row=18, column=0, sticky='w', pady=2)
+        # --- SECCIÓN DE BASES DE DATOS (SYNOLOGY) ---
+        ttk.Label(frame, text="Rutas Bases de Datos (LC/SC)", font=("Helvetica", 10, "bold")).grid(row=18, column=0, columnspan=3, sticky='w', pady=(0,5))
+        
+        ttk.Label(frame, text="Línea JWS1-1:").grid(row=19, column=0, sticky='w', pady=2)
+        self.db_path_1 = tk.StringVar(value=self.app.config.get('db_path_jws1_1', ''))
+        ttk.Entry(frame, textvariable=self.db_path_1, width=60).grid(row=19, column=1, sticky='ew', padx=5)
+        ttk.Button(frame, text="...", command=lambda: self.browse_db_file(self.db_path_1)).grid(row=19, column=2, padx=5)
+
+        ttk.Label(frame, text="Línea JWS1-2:").grid(row=20, column=0, sticky='w', pady=2)
+        self.db_path_2 = tk.StringVar(value=self.app.config.get('db_path_jws1_2', ''))
+        ttk.Entry(frame, textvariable=self.db_path_2, width=60).grid(row=20, column=1, sticky='ew', padx=5)
+        ttk.Button(frame, text="...", command=lambda: self.browse_db_file(self.db_path_2)).grid(row=20, column=2, padx=5)
+
+        ttk.Label(frame, text="Línea JWS1-3:").grid(row=21, column=0, sticky='w', pady=2)
+        self.db_path_3 = tk.StringVar(value=self.app.config.get('db_path_jws1_3', ''))
+        ttk.Entry(frame, textvariable=self.db_path_3, width=60).grid(row=21, column=1, sticky='ew', padx=5)
+        ttk.Button(frame, text="...", command=lambda: self.browse_db_file(self.db_path_3)).grid(row=21, column=2, padx=5)
+
+        ttk.Separator(frame).grid(row=22, column=0, columnspan=3, pady=10, sticky='ew')
+
+        ttk.Label(frame, text="BD Local/General (MPO/Fanout):").grid(row=23, column=0, sticky='w', pady=2)
         self.db_path = tk.StringVar(value=self.app.config.get('db_path', ''))
-        ttk.Entry(frame, textvariable=self.db_path, width=60).grid(row=18, column=1, sticky='ew', padx=5)
-        ttk.Button(frame, text="...", command=self.browse_db_file).grid(row=18, column=2, padx=5)
+        ttk.Entry(frame, textvariable=self.db_path, width=60).grid(row=23, column=1, sticky='ew', padx=5)
+        ttk.Button(frame, text="...", command=lambda: self.browse_db_file(self.db_path)).grid(row=23, column=2, padx=5)
+        
+        # --- Configuración de Identidad de la Línea ---
+        ttk.Separator(frame).grid(row=24, column=0, columnspan=3, pady=10, sticky='ew')
+        ttk.Label(frame, text="Línea de esta PC (Estación):", font=("Helvetica", 10, "bold")).grid(row=25, column=0, sticky='w', pady=2)
+        self.linea_actual_var = tk.StringVar(value=self.app.config.get('linea_actual', 'JWS1-1'))
+        cb_linea = ttk.Combobox(frame, textvariable=self.linea_actual_var, values=["JWS1-1", "JWS1-2", "JWS1-3"], state="readonly", width=15)
+        cb_linea.grid(row=25, column=1, sticky='w', padx=5)
         
         btn_frame = ttk.Frame(frame)
-        btn_frame.grid(row=19, column=0, columnspan=3, pady=20)
+        btn_frame.grid(row=26, column=0, columnspan=3, pady=20)
         ttk.Button(btn_frame, text="Guardar", command=self.save_and_close, style='success.TButton').pack(side='left', padx=10)
         ttk.Button(btn_frame, text="Cancelar", command=self.destroy, style='danger.TButton').pack(side='left', padx=10)
         
@@ -2843,19 +2949,20 @@ class SettingsWindow(tk.Toplevel):
         if directory:
             path_var.set(directory)
 
-    def browse_db_file(self):
-        initial_dir = os.path.dirname(self.db_path.get()) if os.path.exists(self.db_path.get()) else "/"
+    def browse_db_file(self, path_var):
+        initial_dir = os.path.dirname(path_var.get()) if os.path.exists(path_var.get()) else "/"
         filepath = filedialog.asksaveasfilename(
             defaultextension=".db",
             filetypes=[("Database files", "*.db"), ("All files", "*.*")],
             initialdir=initial_dir,
-            initialfile=os.path.basename(self.db_path.get())
+            initialfile=os.path.basename(path_var.get()) if path_var.get() else "verifications.db"
         )
         if filepath:
-            self.db_path.set(filepath)
+            path_var.set(filepath)
 
     def save_and_close(self):
         new_config = {
+            "linea_actual": self.linea_actual_var.get(),
             "ruta_base_ilrl": self.ilrl_path.get(),
             "ruta_base_ilrl_2": self.ilrl_path_2.get(),
             "ruta_base_geo": self.geo_path.get(),
@@ -2864,8 +2971,10 @@ class SettingsWindow(tk.Toplevel):
             "ruta_base_geo_mpo": self.geo_mpo_path.get(),
             "ruta_base_polaridad_mpo": self.polaridad_mpo_path.get(),
             "db_path": self.db_path.get(),
+            "db_path_jws1_1": self.db_path_1.get(),
+            "db_path_jws1_2": self.db_path_2.get(),
+            "db_path_jws1_3": self.db_path_3.get(),
             "ruta_base_geo_fanout_lc": self.geo_fanout_path.get(),
-            # Guardamos las de Uniboot
             "ruta_base_ilrl_uniboot": self.ilrl_uniboot_path.get(),
             "ruta_base_geo_uniboot": self.geo_uniboot_path.get()
         }
@@ -3596,10 +3705,6 @@ class VerificacionMPO_Page(ttk.Frame):
             
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo abrir la carpeta del archivo:\n{e}", parent=self)
-
-# =======================================================================================
-# ========================= MÓDULOS PARA FANOUT (NUEVO PRODUCTO) ========================
-# =======================================================================================
 
 class VerificacionFanout_Page(tk.Frame):
     def __init__(self, parent, app):
@@ -4669,10 +4774,6 @@ class DetailsWindow(tk.Toplevel):
         
         return (), []
 
-# =======================================================================================
-# ========================= MÓDULO PARA UNIBOOT (HÍBRIDO LC/SC + FANOUT) ================
-# =======================================================================================
-
 class VerificacionUniboot_Page(ttk.Frame):
     def __init__(self, parent, app_instance):
         super().__init__(parent, padding=10)
@@ -4750,13 +4851,14 @@ class VerificacionUniboot_Page(ttk.Frame):
             cursor.execute("""
                 INSERT INTO cable_verifications (
                     entry_date, serial_number, ot_number, overall_status,
-                    ilrl_status, ilrl_details, geo_status, geo_details
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ilrl_status, ilrl_details, geo_status, geo_details, digital_seal
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 log_data['serial_number'], log_data['ot_number'], log_data['overall_status'],
                 log_data['ilrl_status'], json.dumps(log_data['ilrl_details']),
-                log_data['geo_status'], json.dumps(log_data['geo_details'])
+                log_data['geo_status'], json.dumps(log_data['geo_details']),
+                log_data.get('digital_seal', 'N/A') # <--- Inserción del sello
             ))
             conn.commit()
             conn.close()
@@ -4820,6 +4922,7 @@ class VerificacionUniboot_Page(ttk.Frame):
         self.mostrar_resultado("IL/RL", self.last_ilrl_result)
         self.mostrar_resultado("Geometría", self.last_geo_result)
 
+        # --- Semáforo Final ---
         final_status = "NO ENCONTRADO"
         if self.last_ilrl_result['status'] not in ['NO ENCONTRADO', 'ERROR'] or self.last_geo_result['status'] not in ['NO ENCONTRADO', 'ERROR']:
             if self.last_ilrl_result['status'] == 'APROBADO' and self.last_geo_result['status'] == 'APROBADO':
@@ -4827,9 +4930,25 @@ class VerificacionUniboot_Page(ttk.Frame):
             else:
                 final_status = 'RECHAZADO'
         
+        # --- Semáforo Final ---
+        final_status = "NO ENCONTRADO"
+        if self.last_ilrl_result['status'] not in ['NO ENCONTRADO', 'ERROR'] or self.last_geo_result['status'] not in ['NO ENCONTRADO', 'ERROR']:
+            if self.last_ilrl_result['status'] == 'APROBADO' and self.last_geo_result['status'] == 'APROBADO':
+                final_status = 'APROBADO'
+            else:
+                final_status = 'RECHAZADO'
+        
+        # --- CREACIÓN DEL SELLO DIGITAL ---
+        # El Sello Digital será exactamente el Número de Serie (único e irrepetible)
+        sello_digital = serie_cable
+        
         self.result_text.insert(tk.END, "\n" + "-"*60 + "\n")
         self.result_text.insert(tk.END, "ESTADO FINAL: ", ("bold", "final_status_large"))
         self.result_text.insert(tk.END, f"{final_status}\n", (final_status, "final_status_large"))
+        
+        # Mostramos el sello en pantalla
+        self.result_text.insert(tk.END, f"SELLO DIGITAL:  {sello_digital}\n", "header")
+        self.result_text.insert(tk.END, "-"*60 + "\n")
         
         if winsound:
             try:
@@ -4838,6 +4957,15 @@ class VerificacionUniboot_Page(ttk.Frame):
             except: pass
         
         self.result_text.config(state=tk.DISABLED)
+        
+        # Añadimos el sello al diccionario de log
+        log_data = {
+            'serial_number': serie_cable, 'ot_number': ot_numero, 'overall_status': final_status,
+            'ilrl_status': self.last_ilrl_result['status'], 'ilrl_details': self.last_ilrl_result,
+            'geo_status': self.last_geo_result['status'], 'geo_details': self.last_geo_result,
+            'digital_seal': sello_digital # <--- Guardamos el sello (N.S.) en la base de datos
+        }
+        self._log_verification(log_data)
         
         log_data = {
             'serial_number': serie_cable, 'ot_number': ot_numero, 'overall_status': final_status,
@@ -5031,6 +5159,1304 @@ class VerificacionUniboot_Page(ttk.Frame):
             os.startfile(os.path.abspath(os.path.dirname(file_path)))
         else:
             messagebox.showerror("Error", f"La ruta no existe:\n{file_path}", parent=self)
+
+class Auditoria_LC_SC_Page(ttk.Frame):
+    def __init__(self, parent, app_instance):
+        super().__init__(parent, padding=20)
+        self.app = app_instance
+        self.analisis_ilrl = AnalisisILRL()
+        self.analisis_geo = AnalisisGEO()
+        self.create_widgets()
+
+    def create_widgets(self):
+        container = ttk.Frame(self, style='TFrame')
+        container.pack(expand=True, fill='both')
+
+        ctrl_frame = ttk.LabelFrame(container, text="Parámetros de Auditoría Automática", padding=15)
+        ctrl_frame.pack(fill='x', pady=(0, 15))
+
+        # ==========================================
+        # FILA 1: ENTRADAS DE DATOS (Filtros limpios)
+        # ==========================================
+        inputs_frame = ttk.Frame(ctrl_frame)
+        inputs_frame.pack(fill='x', pady=(0, 15))
+
+        ttk.Label(inputs_frame, text="Número de O.T.:", font=("Helvetica", 11, "bold")).pack(side='left', padx=5)
+        self.ot_var = tk.StringVar()
+        ttk.Entry(inputs_frame, textvariable=self.ot_var, width=18, font=("Helvetica", 11)).pack(side='left', padx=5)
+
+        ttk.Label(inputs_frame, text="Total Esperado:", font=("Helvetica", 11, "bold")).pack(side='left', padx=(20, 5))
+        self.total_var = tk.StringVar()
+        ttk.Entry(inputs_frame, textvariable=self.total_var, width=8, font=("Helvetica", 11)).pack(side='left', padx=5)
+
+        # ==========================================
+        # FILA 2: BOTONES DE ACCIÓN Y SWITCHES
+        # ==========================================
+        actions_frame = ttk.Frame(ctrl_frame)
+        actions_frame.pack(fill='x')
+
+        ttk.Button(actions_frame, text="▶ Ejecutar Auditoría", command=self.ejecutar_auditoria_thread, style='success.TButton').pack(side='left', padx=(5, 20))
+        
+        self.btn_excel = ttk.Button(actions_frame, text="📊 Descargar Reporte", command=self.descargar_reporte_excel, style='info.TButton', state=tk.DISABLED)
+        self.btn_excel.pack(side='left', padx=5)
+        
+        self.btn_exportar = ttk.Button(actions_frame, text="☁️ Subir a Feishu", command=self.exportar_feishu_thread, style='info.TButton', state=tk.DISABLED)
+        self.btn_exportar.pack(side='left', padx=5)
+
+        self.liberar_var = tk.BooleanVar(value=False)
+        self.chk_liberar = ttk.Checkbutton(actions_frame, text="✅ Aprobar Liberación Oficial", variable=self.liberar_var, bootstyle="success-round-toggle")
+        self.chk_liberar.pack(side='left', padx=(30, 5)) 
+
+        # --- Título de Resumen ---
+        self.summary_label = ttk.Label(container, text="Ingrese la O.T. y cantidad. El sistema consolidará datos de TODAS las líneas de producción.", font=("Helvetica", 12, "italic"), foreground="#555555")
+        self.summary_label.pack(anchor='w', pady=5)
+
+        # =========================================================================
+        # NUEVO: BARRA DE FILTROS POR COLUMNA (Búsqueda en Tiempo Real)
+        # ==========================================
+        filtros_frame = ttk.LabelFrame(container, text="🔍 Filtros de Búsqueda Rápida", padding=5)
+        filtros_frame.pack(fill='x', pady=(0, 10))
+
+        # Variables de memoria para cada columna (El trace_add hace que filtren mientras escribes)
+        self.var_f_cable = tk.StringVar(); self.var_f_cable.trace_add("write", self.aplicar_filtros)
+        self.var_f_ilrl = tk.StringVar(); self.var_f_ilrl.trace_add("write", self.aplicar_filtros)
+        self.var_f_geo = tk.StringVar(); self.var_f_geo.trace_add("write", self.aplicar_filtros)
+        self.var_f_estado = tk.StringVar(); self.var_f_estado.trace_add("write", self.aplicar_filtros)
+        self.var_f_sello = tk.StringVar(); self.var_f_sello.trace_add("write", self.aplicar_filtros)
+
+        # Cajas de texto alineadas horizontalmente
+        ttk.Label(filtros_frame, text="Cable:").grid(row=0, column=0, padx=(5,2), sticky='w')
+        ttk.Entry(filtros_frame, textvariable=self.var_f_cable, width=18).grid(row=0, column=1, padx=2)
+
+        ttk.Label(filtros_frame, text="IL/RL:").grid(row=0, column=2, padx=(10,2), sticky='w')
+        ttk.Entry(filtros_frame, textvariable=self.var_f_ilrl, width=12).grid(row=0, column=3, padx=2)
+
+        ttk.Label(filtros_frame, text="Geo:").grid(row=0, column=4, padx=(10,2), sticky='w')
+        ttk.Entry(filtros_frame, textvariable=self.var_f_geo, width=12).grid(row=0, column=5, padx=2)
+
+        ttk.Label(filtros_frame, text="Estado:").grid(row=0, column=6, padx=(10,2), sticky='w')
+        ttk.Entry(filtros_frame, textvariable=self.var_f_estado, width=15).grid(row=0, column=7, padx=2)
+
+        ttk.Label(filtros_frame, text="Sello BD:").grid(row=0, column=8, padx=(10,2), sticky='w')
+        ttk.Entry(filtros_frame, textvariable=self.var_f_sello, width=18).grid(row=0, column=9, padx=2)
+        
+        # Botón para borrar todo rápido
+        ttk.Button(filtros_frame, text="✖ Limpiar", command=self.limpiar_filtros, style='secondary.TButton').grid(row=0, column=10, padx=(15,5))
+        # =========================================================================
+
+        columns = ("Cable", "IL/RL", "Geometría", "Estado Final", "Sello en BD")
+        self.tree = ttk.Treeview(container, columns=columns, show="headings", height=15)
+        self.tree = ttk.Treeview(container, columns=columns, show="headings", height=15)
+        
+        for col in columns:
+            self.tree.heading(col, text=col)
+            if col == "Cable": self.tree.column(col, anchor='w', width=200)
+            elif col == "Sello en BD": self.tree.column(col, anchor='center', width=180)
+            else: self.tree.column(col, anchor='center', width=120)
+
+        self.tree.tag_configure('APROBADO', foreground='green', font=("Helvetica", 10, "bold"))
+        self.tree.tag_configure('RECHAZADO', foreground='red', font=("Helvetica", 10, "bold"))
+        self.tree.tag_configure('FALTANTE', foreground='#d35400', font=("Helvetica", 10, "bold"))
+        self.tree.tag_configure('INTRUSO', foreground='purple', font=("Helvetica", 10, "bold"))
+        self.tree.tag_configure('SCRAP CONFIRMADO', foreground='gray', font=("Helvetica", 10, "bold", "overstrike"))
+        self.tree.tag_configure('SCRAP PENDIENTE', foreground='red', font=("Helvetica", 10, "bold"))
+
+        scrollbar = ttk.Scrollbar(container, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=scrollbar.set)
+        self.tree.pack(side='left', fill='both', expand=True)
+        scrollbar.pack(side='right', fill='y')
+        
+        self.tree.bind("<Double-1>", self.mostrar_detalles_cable)
+
+    def ejecutar_auditoria_thread(self):
+        self.summary_label.config(text="Buscando archivos y analizando datos... Por favor espera.", foreground="#0056b3")
+        self.tree.delete(*self.tree.get_children())
+        threading.Thread(target=self._proceso_auditoria, daemon=True).start()
+
+    def mostrar_detalles_cable(self, event):
+        seleccion = self.tree.selection()
+        if not seleccion: return
+        valores = self.tree.item(seleccion[0])['values']
+        if not valores: return
+
+        cable = str(valores[0])
+        detalles = getattr(self, 'detalles_auditoria', {}).get(cable)
+        if not detalles:
+            messagebox.showinfo("Sin Detalles", f"No hay información extra para {cable}.")
+            return
+
+        top = tk.Toplevel(self)
+        top.title(f"Detalles de Auditoría - {cable}")
+        top.geometry("550x450")
+        top.transient(self.app)
+        top.grab_set()
+
+        def cerrar_si_clic_afuera(e):
+            x, y = top.winfo_rootx(), top.winfo_rooty()
+            w, h = top.winfo_width(), top.winfo_height()
+            if not (x <= e.x_root <= x + w and y <= e.y_root <= y + h):
+                top.destroy()
+        top.bind("<Button-1>", cerrar_si_clic_afuera)
+
+        ttk.Label(top, text=f"🔍 Informe Detallado", font=("Helvetica", 14, "bold")).pack(pady=(15,5))
+        ttk.Label(top, text=cable, font=("Courier New", 12)).pack(pady=(0,15))
+        frame = ttk.Frame(top, padding=20, relief="groove", borderwidth=2)
+        frame.pack(fill="both", expand=True, padx=20, pady=5)
+
+        ttk.Label(frame, text="Sello Digital BD:", font=("Helvetica", 10, "bold")).grid(row=0, column=0, sticky="w", pady=5)
+        ttk.Label(frame, text=detalles['sello'], font=("Courier New", 10)).grid(row=0, column=1, sticky="w", pady=5)
+        ttk.Label(frame, text="Estado Final:", font=("Helvetica", 10, "bold")).grid(row=1, column=0, sticky="w", pady=5)
+        
+        lbl_final = ttk.Label(frame, text=detalles['final'], font=("Helvetica", 10, "bold"))
+        lbl_final.grid(row=1, column=1, sticky="w", pady=5)
+        if detalles['final'] == 'APROBADO': lbl_final.config(foreground="green")
+        elif detalles['final'] == 'FALTANTE': lbl_final.config(foreground="#d35400")
+        else: lbl_final.config(foreground="red")
+
+        ttk.Separator(frame).grid(row=2, column=0, columnspan=2, sticky="ew", pady=10)
+        ttk.Label(frame, text="Resultados IL/RL", font=("Helvetica", 11, "bold"), foreground="#0056b3").grid(row=3, column=0, columnspan=2, sticky="w", pady=2)
+        ttk.Label(frame, text=f"Estado: {detalles['ilrl']['estado']}", font=("Helvetica", 10, "italic")).grid(row=4, column=0, columnspan=2, sticky="w")
+        ttk.Label(frame, text=detalles['ilrl']['detalle'], wraplength=450).grid(row=5, column=0, columnspan=2, sticky="w", pady=(2, 10))
+        ttk.Label(frame, text="Resultados Geometría (DIMENSION)", font=("Helvetica", 11, "bold"), foreground="#0056b3").grid(row=6, column=0, columnspan=2, sticky="w", pady=2)
+        ttk.Label(frame, text=f"Estado: {detalles['geo']['estado']}", font=("Helvetica", 10, "italic")).grid(row=7, column=0, columnspan=2, sticky="w")
+        ttk.Label(frame, text=detalles['geo']['detalle'], wraplength=450).grid(row=8, column=0, columnspan=2, sticky="w", pady=(2, 10))
+
+        ttk.Button(top, text="Cerrar", command=top.destroy, style="danger.TButton").pack(pady=15)
+
+    def _proceso_auditoria(self):
+        ot_raw = self.ot_var.get().strip().upper()
+        total_raw = self.total_var.get().strip()
+
+        if not ot_raw or not total_raw.isdigit():
+            self.app.after(0, lambda: messagebox.showwarning("Datos Inválidos", "Ingrese una O.T. y una cantidad total válida."))
+            self.app.after(0, lambda: self.summary_label.config(text="Error en los datos de entrada.", foreground="red"))
+            return
+
+        ot_num = re.sub(r'[^0-9]', '', ot_raw)
+        ot_completa = f"JMO-{ot_num}"
+        total = int(total_raw)
+        self.detalles_auditoria = {}
+
+        # 1. Recopilar TODAS las bases de datos configuradas en la planta
+        rutas_bds = []
+        for key in ['db_path_jws1_1', 'db_path_jws1_2', 'db_path_jws1_3', 'db_path']:
+            path = self.app.config.get(key, '')
+            if path and os.path.exists(path) and path not in rutas_bds:
+                rutas_bds.append(path)
+
+        if not rutas_bds:
+            self.app.after(0, lambda: messagebox.showerror("Error", "No hay bases de datos configuradas o accesibles en red."))
+            self.app.after(0, lambda: self.summary_label.config(text="Error de conexión a BD.", foreground="red"))
+            return
+
+        consolidado = []
+        aprobados_count, rechazados_count, faltantes_count, scraps_count = 0, 0, 0, 0
+        intrusos_encontrados = set()
+
+        try:
+            # 1. Extraer TODOS los cables y NORMALIZAR la llave para evitar duplicados JMO/JRMO
+            cables_en_bd = {}
+            for db_path in rutas_bds:
+                try:
+                    conn = sqlite3.connect(db_path, timeout=10)
+                    conn.row_factory = sqlite3.Row
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        SELECT * FROM cable_verifications
+                        WHERE ot_number = ? OR serial_number LIKE ?
+                        ORDER BY id ASC
+                    """, (ot_completa, f"%{ot_num}%"))
+                    
+                    for row in cursor.fetchall():
+                        sn_real = row['serial_number']
+                        # Aseguramos que la llave siempre tenga el mismo formato base
+                        numeros = re.sub(r'[^0-9]', '', sn_real)
+                        sn_normalizado = f"JMO-{numeros[:13]}" if len(numeros) >= 13 else sn_real
+                        
+                        row_dict = dict(row)
+                        
+                        if sn_normalizado not in cables_en_bd:
+                            cables_en_bd[sn_normalizado] = row_dict
+                        else:
+                            fecha_existente = cables_en_bd[sn_normalizado].get('entry_date', '1900-01-01 00:00:00')
+                            fecha_nueva = row_dict.get('entry_date', '1900-01-01 00:00:00')
+                            if fecha_nueva > fecha_existente:
+                                cables_en_bd[sn_normalizado] = row_dict
+                    conn.close()
+                except Exception as db_err:
+                    print(f"Aviso: No se pudo leer {db_path} - {db_err}")
+
+            # 2. CALCULAR EL LÍMITE REAL (Total esperado + Repuestos exactos por Scrap)
+            scraps_reales = sum(1 for row in cables_en_bd.values() if 'SCRAP' in row.get('overall_status', ''))
+            limite_secuencial = total + scraps_reales
+
+            scraps_pendientes_list = []
+            
+            # 3. Evaluar SOLO desde el cable 1 hasta el límite lógico
+            for i in range(1, limite_secuencial + 1):
+                secuencial = str(i).zfill(4)
+                cable_visual = f"{ot_completa}{secuencial}"
+                
+                row_encontrado = cables_en_bd.get(cable_visual)
+
+                if row_encontrado:
+                    sello_bd = row_encontrado['digital_seal'] if (row_encontrado['digital_seal'] and row_encontrado['digital_seal'] != "N/A") else row_encontrado['serial_number']
+                    estado_final = row_encontrado['overall_status']
+                    estado_ilrl = row_encontrado['ilrl_status']
+                    estado_geo = row_encontrado['geo_status']
+                    
+                    try: ilrl_det = json.loads(row_encontrado['ilrl_details']).get('details', 'Detalle no disponible')
+                    except: ilrl_det = 'Detalle no disponible'
+                        
+                    try: geo_det = json.loads(row_encontrado['geo_details']).get('details', 'Detalle no disponible')
+                    except: geo_det = 'Detalle no disponible'
+
+                    if estado_final in ['SCRAP', 'SCRAP CONFIRMADO']:
+                        sello_bd = "SCRAP CONFIRMADO"
+                        estado_final = "SCRAP CONFIRMADO"
+                        estado_ilrl = "SCRAP CONFIRMADO"
+                        estado_geo = "SCRAP CONFIRMADO"
+                        ilrl_det = "Confirmado por Calidad."
+                        geo_det = "Confirmado por Calidad."
+                        scraps_count += 1
+                    elif estado_final == 'SCRAP PENDIENTE':
+                        sello_bd = "SCRAP PENDIENTE"
+                        estado_final = "SCRAP PENDIENTE"
+                        estado_ilrl = "PENDIENTE"
+                        estado_geo = "PENDIENTE"
+                        ilrl_det = "Enviado a Scrap por Producción (Falta confirmar)."
+                        geo_det = "Enviado a Scrap por Producción (Falta confirmar)."
+                        scraps_count += 1
+                        scraps_pendientes_list.append(cable_visual)
+                    elif estado_final == 'APROBADO':
+                        aprobados_count += 1
+                    else:
+                        rechazados_count += 1
+                else:
+                    sello_bd = "SIN SELLO (No escaneado)"
+                    estado_final = "FALTANTE"
+                    estado_ilrl = "FALTANTE"
+                    estado_geo = "FALTANTE"
+                    ilrl_det = "Cable jamás escaneado en Verificación."
+                    geo_det = "Cable jamás escaneado en Verificación."
+                    faltantes_count += 1
+
+                self.detalles_auditoria[cable_visual] = {
+                    'sello': sello_bd, 
+                    'final': estado_final,
+                    'ilrl': {'estado': estado_ilrl, 'detalle': ilrl_det},
+                    'geo': {'estado': estado_geo, 'detalle': geo_det}
+                }
+                consolidado.append((cable_visual, estado_ilrl, estado_geo, estado_final, sello_bd))
+
+            # 4. Actualizar Interfaz (intrusos = 0 porque ya no usamos ese concepto para repuestos de la misma OT)
+            self.app.after(0, self._actualizar_ui, consolidado, aprobados_count, rechazados_count, faltantes_count, 0, scraps_count, total)
+
+            # --- ALERTA EMERGENTE DE SCRAPS PENDIENTES ---
+            if scraps_pendientes_list:
+                mensaje_alerta = f"¡ATENCIÓN!\n\nSe detectaron {len(scraps_pendientes_list)} cable(s) enviados a Scrap por Producción que AÚN NO han sido confirmados por FQC:\n\n"
+                mensaje_alerta += "\n".join(scraps_pendientes_list[:10])
+                if len(scraps_pendientes_list) > 10:
+                    mensaje_alerta += f"\n... y {len(scraps_pendientes_list) - 10} más."
+                mensaje_alerta += "\n\nPor favor, diríjase a 'Buscar Sello Digital' y confirme estos cables para autorizar el Scrap oficial."
+                
+                self.app.after(100, lambda: messagebox.showwarning("Scraps Pendientes de Confirmación", mensaje_alerta))
+
+        except Exception as e:
+            error_trace = traceback.format_exc()
+            print(error_trace)
+            self.app.after(0, lambda: messagebox.showerror("Error Crítico", f"Falló la auditoría consolidada:\n{e}"))
+
+    def _actualizar_ui(self, consolidado, aprobados, rechazados, faltantes, intrusos, scraps, total):
+        # --- NUEVO: Guardamos la tabla completa en memoria y llamamos al filtro ---
+        self.datos_completos = consolidado
+        self.aplicar_filtros()
+        # --------------------------------------------------------------------------
+        
+        resumen = f"📊 RESULTADOS  |  Meta: {total}  |  ✅ Aprobados: {aprobados}  |  ❌ Rechazados: {rechazados}  |  ⚠️ Faltantes: {faltantes}"
+        if intrusos > 0: resumen += f"  |  🚨 INTRUSOS: {intrusos}"
+        if scraps > 0: resumen += f"  |  🗑️ SCRAP: {scraps}"
+        
+        estado_lote_final = "RECHAZADO"
+        if aprobados >= total and intrusos == 0:
+            estado_lote_final = "APROBADO"
+            self.summary_label.config(text=resumen + "  (¡LOTE LISTO PARA LIBERAR!)", foreground="green", font=("Helvetica", 12, "bold"))
+        elif intrusos > 0:
+            self.summary_label.config(text=resumen + "  (¡ALERTA! HAY ARCHIVOS DE OTRA O.T.)", foreground="purple", font=("Helvetica", 12, "bold"))
+        else:
+            self.summary_label.config(text=resumen, foreground="#d35400", font=("Helvetica", 12, "bold"))
+            
+        self.datos_feishu_pendientes = {
+            # ... lo que ya tenías
+        }
+        self.btn_exportar.config(state=tk.NORMAL)
+        self.btn_excel.config(state=tk.NORMAL)
+
+    def exportar_feishu_thread(self):
+        self.btn_exportar.config(state=tk.DISABLED, text="Sincronizando...")
+        threading.Thread(target=self._proceso_exportar_feishu, daemon=True).start()
+
+    def _proceso_exportar_feishu(self):
+        try:
+            # ¡INGRESA TUS CÓDIGOS DE FEISHU AQUÍ!
+            APP_ID = "tu_app_id_aqui" 
+            APP_SECRET = "tu_app_secret_aqui"
+            APP_TOKEN = "tu_app_token_aqui" 
+            TABLE_ID = "tu_table_id_aqui" 
+            
+            feishu = FeishuIntegrator(APP_ID, APP_SECRET, APP_TOKEN, TABLE_ID)
+            feishu.create_bitable_record(self.datos_feishu_pendientes)
+            
+            self.app.after(0, lambda: messagebox.showinfo("Sincronización Exitosa", "Subido a Feishu Bitable."))
+            self.app.after(0, lambda: self.btn_exportar.config(text="☁️ Subido a Feishu", style='success.TButton'))
+        except Exception as e:
+            print(traceback.format_exc())
+            self.app.after(0, lambda: messagebox.showerror("Error de Red", f"Fallo al subir:\n{e}"))
+            self.app.after(0, lambda: self.btn_exportar.config(state=tk.NORMAL, text="☁️ Reintentar Feishu", style='danger.TButton'))
+    
+    def descargar_reporte_excel(self):
+        if not hasattr(self, 'detalles_auditoria') or not self.detalles_auditoria:
+            messagebox.showwarning("Sin Datos", "Primero debes ejecutar una auditoría.")
+            return
+
+        ot_num = re.sub(r'[^0-9]', '', self.ot_var.get())
+        ot_completa = f"JMO-{ot_num}"
+        total_esperado = int(self.total_var.get()) if self.total_var.get().isdigit() else 0
+
+        # 1. Encontrar el Escritorio de forma segura
+        home = os.path.expanduser("~")
+        desktop_base = os.path.join(home, "Desktop")
+        posibles_rutas = [
+            os.path.join(home, "OneDrive", "Escritorio"),
+            os.path.join(home, "OneDrive", "Desktop"),
+            os.path.join(home, "Escritorio"),
+            os.path.join(home, "Desktop")
+        ]
+        for ruta in posibles_rutas:
+            if os.path.exists(ruta):
+                desktop_base = ruta
+                break
+
+        carpeta_reportes = os.path.join(desktop_base, "Reportes de Auditoria FibraTrace")
+        os.makedirs(carpeta_reportes, exist_ok=True)
+
+        nombre_archivo = f"Reporte_VERIF_{ot_completa}.xlsx"
+        ruta_completa = os.path.join(carpeta_reportes, nombre_archivo)
+
+        try:
+            wb = Workbook()
+            
+            # =========================================================
+            # HOJA 1: NUEVA PORTADA DE INFORMACIÓN GENERAL
+            # =========================================================
+            ws_info = wb.active
+            ws_info.title = "Información General"
+            ws_info.sheet_view.showGridLines = False # Oculta la cuadrícula para que se vea como documento
+
+            ws_info['A1'] = "REPORTE OFICIAL DE AUDITORÍA"
+            ws_info['A1'].font = Font(size=18, bold=True, color="2C3E50")
+
+            ws_info['A3'] = "Orden de Trabajo (O.T.):"
+            ws_info['B3'] = ot_completa
+
+            # Extraemos el nombre del auditor que inició sesión
+            auditor = getattr(self.app, 'auditor_name', 'Auditor Desconocido')
+            ws_info['A4'] = "Auditor Responsable:"
+            ws_info['B4'] = auditor
+
+            ws_info['A5'] = "Fecha y Hora de Generación:"
+            ws_info['B5'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            ws_info['A6'] = "Línea de Producción Auditada:"
+            ws_info['B6'] = "Múltiples (Consolidado Automático BD)"
+            
+            # --- Si tiene ID de Liberación Oficial, lo añadimos ---
+            quiere_liberar = self.liberar_var.get()
+            if quiere_liberar:
+                ws_info['A7'] = "ID de Liberación Oficial:"
+                ws_info['B7'] = "SE ASIGNARÁ EN LA HOJA DE RESUMEN" # Se llenará en la siguiente hoja
+
+            # Darle formato a la tablita
+            for i in range(3, 8):
+                ws_info[f'A{i}'].font = Font(bold=True)
+                ws_info[f'A{i}'].alignment = Alignment(horizontal="right")
+                ws_info[f'B{i}'].font = Font(color="0056b3", bold=True)
+                ws_info[f'B{i}'].alignment = Alignment(horizontal="left")
+
+            ws_info.column_dimensions['A'].width = 30
+            ws_info.column_dimensions['B'].width = 35
+
+            # =========================================================================
+            # HOJA 2: RESUMEN EJECUTIVO DE O.T. (Antes era la Hoja 1)
+            # =========================================================================
+            ws_resumen = wb.create_sheet("Resumen O.T.")
+            
+            # Procesar métricas para el resumen
+            total_procesados = len(self.detalles_auditoria)
+            aprobados_count = 0
+            rechazados_count = 0
+            intrusos = []
+            sin_sello = []
+            scraped_cables = []
+
+            for cable, datos in self.detalles_auditoria.items():
+                estado = datos.get('final')
+                if estado == 'APROBADO':
+                    aprobados_count += 1
+                elif estado == 'RECHAZADO':
+                    rechazados_count += 1
+                elif estado == 'INTRUSO':
+                    intrusos.append(cable)
+                elif estado in ['SCRAP', 'SCRAP CONFIRMADO', 'SCRAP PENDIENTE']:
+                    scraped_cables.append(cable)
+                
+                # Buscar cables sin sello
+                sello_str = str(datos.get('sello', '')).upper()
+                if estado not in ['SCRAP', 'SCRAP CONFIRMADO', 'SCRAP PENDIENTE'] and ("SIN SELLO" in sello_str or "NO REGISTRADO" in sello_str or "ERROR" in sello_str):
+                    sin_sello.append(cable)
+
+            # --- LÓGICA FLEXIBLE DE APROBACIÓN DE LOTE (Manejo de Repuestos) ---
+            # El lote se aprueba si: Alcanza la meta solicitada AND No hay cables sin verificar AND No hay rechazados
+            lote_aprobado = (aprobados_count >= total_esperado) and (rechazados_count == 0) and (len(sin_sello) == 0)
+
+            # --- POKA-YOKE DE LIBERACIÓN ---
+            quiere_liberar = self.liberar_var.get()
+            if quiere_liberar and not lote_aprobado:
+                messagebox.showwarning("Liberación Bloqueada", "No puedes liberar una O.T. con estado RECHAZADO.\n\nEl reporte de auditoría se generará, pero sin la etiqueta de liberación oficial para empaque.", parent=self)
+                quiere_liberar = False
+                self.liberar_var.set(False)
+
+            # Estilos
+            bold_font = Font(bold=True)
+            title_font = Font(size=16, bold=True, color="2C3E50")
+            
+            ws_resumen['A1'] = f"RESUMEN DE AUDITORÍA - {ot_completa}"
+            ws_resumen['A1'].font = title_font
+            
+            # --- Tabla de Métricas ---
+            ws_resumen['A3'] = "Cantidad de Cables Esperada:"
+            ws_resumen['B3'] = total_esperado
+            ws_resumen['A3'].font = bold_font
+
+            ws_resumen['A4'] = "Cantidad Total Encontrada/Procesada:"
+            ws_resumen['B4'] = total_procesados
+            ws_resumen['A4'].font = bold_font
+
+            ws_resumen['A5'] = "Cables Aprobados Correctamente:"
+            ws_resumen['B5'] = aprobados_count
+            ws_resumen['A5'].font = bold_font
+
+            ws_resumen['A6'] = "Cantidad de Cables Intrusos:"
+            ws_resumen['B6'] = len(intrusos)
+            ws_resumen['A6'].font = bold_font
+            
+            ws_resumen['A7'] = "Cantidad de Cables SIN Sello Digital:"
+            ws_resumen['B7'] = len(sin_sello)
+            ws_resumen['A7'].font = bold_font
+
+            ws_resumen['A8'] = "Cantidad de Cables en SCRAP:"
+            ws_resumen['B8'] = len(scraped_cables)
+            ws_resumen['A8'].font = bold_font
+
+            # --- RECUADRO GIGANTE DE ESTADO (Semáforo) ---
+            ws_resumen.merge_cells('E2:G6')
+            c_estado = ws_resumen['E2']
+            c_estado.value = "LOTE APROBADO" if lote_aprobado else "LOTE RECHAZADO"
+            c_estado.font = Font(size=24, bold=True, color="FFFFFF")
+            c_estado.alignment = Alignment(horizontal="center", vertical="center")
+            if lote_aprobado:
+                c_estado.fill = PatternFill(start_color="28A745", end_color="28A745", fill_type="solid") # Verde Éxito
+            else:
+                c_estado.fill = PatternFill(start_color="DC3545", end_color="DC3545", fill_type="solid") # Rojo Alerta
+
+            # --- NUEVO: ETIQUETA DE LIBERACIÓN OFICIAL Y GENERACIÓN DE ID ---
+            if quiere_liberar:
+                # 1. Generamos el ID Único
+                id_liberacion = self._generar_id_liberacion()
+
+                # 2. Dibujamos el Banner Azul (En la fila 7)
+                ws_resumen.merge_cells('E7:G7')
+                c_lib = ws_resumen['E7']
+                c_lib.value = "O.T. LIBERADA EXITOSAMENTE"
+                c_lib.font = Font(size=14, bold=True, color="FFFFFF")
+                c_lib.alignment = Alignment(horizontal="center", vertical="center")
+                c_lib.fill = PatternFill(start_color="0056b3", end_color="0056b3", fill_type="solid")
+
+                # 3. Dibujamos el ID Único debajo del banner (En la fila 8)
+                ws_resumen.merge_cells('E8:G8')
+                c_id = ws_resumen['E8']
+                c_id.value = f"ID de Liberación: {id_liberacion}"
+                c_id.font = Font(size=12, bold=True, color="000000")
+                c_id.alignment = Alignment(horizontal="center", vertical="center")
+                
+                # 4. Alerta visual para el Auditor
+                messagebox.showinfo("Lote Liberado Oficialmente", f"Se ha generado el documento de liberación para la O.T. {ot_completa}.\n\nID Asignado: {id_liberacion}\n\nEste código será requerido por Empaque para confirmar el lote.", parent=self)
+            # --- Listados de Anomalías ---
+            ws_resumen['A10'] = "🚨 Listado de Intrusos (Carpetas Equivocadas):"
+            ws_resumen['A10'].font = Font(bold=True, color="5C005C")
+            row_idx = 11
+            if intrusos:
+                for cab in intrusos:
+                    ws_resumen[f'A{row_idx}'] = cab
+                    row_idx += 1
+            else:
+                ws_resumen[f'A{row_idx}'] = "Ninguno detectado."
+                
+            ws_resumen['C10'] = "⚠️ Listado de Cables SIN Sello (Se saltaron Verificación):"
+            ws_resumen['C10'].font = Font(bold=True, color="9C6500")
+            row_idx_sello = 11
+            if sin_sello:
+                for cab in sin_sello:
+                    ws_resumen[f'C{row_idx_sello}'] = cab
+                    row_idx_sello += 1
+            else:
+                ws_resumen[f'C{row_idx_sello}'] = "Todos los cables están sellados."
+            
+            # --- NUEVA COLUMNA DE SCRAP ---
+            ws_resumen['E10'] = "🗑️ Listado de N.S. Scrapeados:"
+            ws_resumen['E10'].font = Font(bold=True, color="808080")
+            row_idx_scrap = 11
+            if scraped_cables:
+                for cab in scraped_cables:
+                    ws_resumen[f'E{row_idx_scrap}'] = cab
+                    row_idx_scrap += 1
+            else:
+                ws_resumen[f'E{row_idx_scrap}'] = "Ninguno reportado."
+
+            ws_resumen.column_dimensions['A'].width = 50
+            ws_resumen.column_dimensions['C'].width = 55
+            ws_resumen.column_dimensions['E'].width = 50
+
+            # =========================================================================
+            # HOJA 2: AUDITORIA O.T. (Desglose Detallado)
+            # =========================================================================
+            ws_detalles = wb.create_sheet("Auditoria O.T.")
+
+            header_fill = PatternFill(start_color="2C3E50", end_color="2C3E50", fill_type="solid") 
+            header_font = Font(color="FFFFFF", bold=True)
+            center_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            left_align = Alignment(horizontal="left", vertical="center", wrap_text=True)
+
+            headers = ["Cable (N.S.)", "Sello Digital (BD)", "ESTADO FINAL", "Estado IL/RL", "Detalles IL/RL", "Estado Geometría", "Detalles Geometría"]
+            ws_detalles.append(headers)
+
+            for col_num, cell in enumerate(ws_detalles[1], 1):
+                cell.fill = header_fill
+                cell.font = header_font
+                cell.alignment = center_align
+
+            for cable, datos in self.detalles_auditoria.items():
+                row = [
+                    cable,
+                    datos.get('sello', 'N/A'),
+                    datos.get('final', 'N/A'),
+                    datos.get('ilrl', {}).get('estado', 'N/A'),
+                    datos.get('ilrl', {}).get('detalle', 'N/A').replace('\n', ' | '), 
+                    datos.get('geo', {}).get('estado', 'N/A'),
+                    datos.get('geo', {}).get('detalle', 'N/A').replace('\n', ' | ')
+                ]
+                ws_detalles.append(row)
+
+            for row in ws_detalles.iter_rows(min_row=2, max_col=7, max_row=ws_detalles.max_row):
+                for i, cell in enumerate(row):
+                    if i in [0, 1, 2, 3, 5]: 
+                        cell.alignment = center_align
+                    else: 
+                        cell.alignment = left_align
+
+                    if i == 2:
+                        if cell.value == "APROBADO":
+                            cell.font = Font(color="006100", bold=True)
+                            cell.fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+                        elif cell.value == "RECHAZADO":
+                            cell.font = Font(color="9C0006", bold=True)
+                            cell.fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+                        elif cell.value == "FALTANTE":
+                            cell.font = Font(color="9C6500", bold=True)
+                            cell.fill = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")
+                        elif cell.value == "INTRUSO":
+                            cell.font = Font(color="5C005C", bold=True)
+                            cell.fill = PatternFill(start_color="E6B3E6", end_color="E6B3E6", fill_type="solid")
+                        elif cell.value == "SCRAP": # <--- AÑADE ESTO
+                            cell.font = Font(color="FFFFFF", bold=True)
+                            cell.fill = PatternFill(start_color="808080", end_color="808080", fill_type="solid")
+
+            ws_detalles.column_dimensions['A'].width = 20
+            ws_detalles.column_dimensions['B'].width = 23
+            ws_detalles.column_dimensions['C'].width = 18
+            ws_detalles.column_dimensions['D'].width = 15
+            ws_detalles.column_dimensions['E'].width = 65 
+            ws_detalles.column_dimensions['F'].width = 18
+            ws_detalles.column_dimensions['G'].width = 65
+
+            ws_detalles.auto_filter.ref = ws_detalles.dimensions
+
+            # Guardar (sobrescribe en automático)
+            wb.save(ruta_completa)
+            os.startfile(ruta_completa)
+            
+        except PermissionError:
+            messagebox.showerror("Archivo en Uso", f"El archivo {nombre_archivo} está abierto en Excel.\n\nPor favor ciérralo antes de generar un reporte nuevo para esta O.T.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Fallo al generar el reporte Excel:\n{e}")
+    
+    def _generar_id_liberacion(self):
+        """Genera un folio único consecutivo REP-FQC-XXXXX y lo guarda en config.json"""
+        config_file = self.app.config_file
+        try:
+            with open(config_file, 'r') as f:
+                config = json.load(f)
+            
+            # Buscamos el último ID usado (Si no existe, empezamos en 0)
+            ultimo_id = config.get("last_fqc_id", 0)
+            siguiente_id = ultimo_id + 1
+            
+            # Actualizamos y guardamos
+            config["last_fqc_id"] = siguiente_id
+            with open(config_file, 'w') as f:
+                json.dump(config, f, indent=4)
+                
+            # Formateamos rellenando con ceros a la izquierda (ej. 00001)
+            return f"REP-FQC-{str(siguiente_id).zfill(5)}"
+        except Exception as e:
+            print(f"Error generando ID: {e}")
+            return "REP-FQC-ERROR"
+    def aplicar_filtros(self, *args):
+        """Dibuja la tabla en tiempo real basándose en lo que el usuario escriba en las cajas de filtro."""
+        # 1. Limpiamos la tabla visual
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+            
+        # 2. Obtenemos lo que el usuario escribió (convertido a minúsculas para que no importe mayúsculas/minúsculas)
+        f_cable = self.var_f_cable.get().lower()
+        f_ilrl = self.var_f_ilrl.get().lower()
+        f_geo = self.var_f_geo.get().lower()
+        f_estado = self.var_f_estado.get().lower()
+        f_sello = self.var_f_sello.get().lower()
+        
+        # 3. Filtramos e insertamos
+        if hasattr(self, 'datos_completos'):
+            for row in self.datos_completos:
+                # row es una tupla: (Cable, IL/RL, Geometría, Estado Final, Sello BD)
+                if (f_cable in str(row[0]).lower() and
+                    f_ilrl in str(row[1]).lower() and
+                    f_geo in str(row[2]).lower() and
+                    f_estado in str(row[3]).lower() and
+                    f_sello in str(row[4]).lower()):
+                    
+                    # Si cumple con TODOS los filtros, lo pintamos en la tabla
+                    self.tree.insert("", "end", values=row, tags=(row[3],))
+
+    def limpiar_filtros(self):
+        """Vacia las cajas de búsqueda para mostrar toda la tabla de nuevo."""
+        self.var_f_cable.set("")
+        self.var_f_ilrl.set("")
+        self.var_f_geo.set("")
+        self.var_f_estado.set("")
+        self.var_f_sello.set("")
+
+class RevisarLote_LC_SC_Page(ttk.Frame):
+    def __init__(self, parent, app_instance):
+        super().__init__(parent, padding=20)
+        self.app = app_instance
+        self.create_widgets()
+
+    def create_widgets(self):
+        container = ttk.Frame(self, style='TFrame')
+        container.pack(expand=True, fill='both')
+
+        ctrl_frame = ttk.LabelFrame(container, text="Parámetros de Revisión de Lote (Empaque)", padding=15)
+        ctrl_frame.pack(fill='x', pady=(0, 15))
+
+        # FILA 1: ENTRADAS DE DATOS (Más limpias)
+        inputs_frame = ttk.Frame(ctrl_frame)
+        inputs_frame.pack(fill='x', pady=(0, 15))
+
+        ttk.Label(inputs_frame, text="Número de O.T.:", font=("Helvetica", 11, "bold")).pack(side='left', padx=5)
+        self.ot_var = tk.StringVar()
+        ttk.Entry(inputs_frame, textvariable=self.ot_var, width=18, font=("Helvetica", 11)).pack(side='left', padx=5)
+
+        ttk.Label(inputs_frame, text="Cantidad de Lote:", font=("Helvetica", 11, "bold")).pack(side='left', padx=(20, 5))
+        self.total_var = tk.StringVar()
+        ttk.Entry(inputs_frame, textvariable=self.total_var, width=8, font=("Helvetica", 11)).pack(side='left', padx=5)
+
+        # FILA 2: BOTONES DE ACCIÓN
+        actions_frame = ttk.Frame(ctrl_frame)
+        actions_frame.pack(fill='x')
+
+        ttk.Button(actions_frame, text="▶ Revisar Lote", command=self.ejecutar_revision_thread, style='success.TButton').pack(side='left', padx=(5, 20))
+        self.btn_excel = ttk.Button(actions_frame, text="📊 Descargar Reporte de Lote", command=self.descargar_reporte_excel, style='info.TButton', state=tk.DISABLED)
+        self.btn_excel.pack(side='left', padx=5)
+
+        self.summary_label = ttk.Label(container, text="Ingrese la O.T. y la cantidad. El sistema buscará inteligentemente en todas las líneas.", font=("Helvetica", 12, "italic"), foreground="#555555")
+        self.summary_label.pack(anchor='w', pady=5)
+
+        columns = ("Cable", "IL/RL", "Geometría", "Estado Final", "Sello en BD")
+        self.tree = ttk.Treeview(container, columns=columns, show="headings", height=15)
+        
+        for col in columns:
+            self.tree.heading(col, text=col)
+            if col == "Cable": self.tree.column(col, anchor='w', width=200)
+            elif col == "Sello en BD": self.tree.column(col, anchor='center', width=180)
+            else: self.tree.column(col, anchor='center', width=120)
+
+        self.tree.tag_configure('APROBADO', foreground='green', font=("Helvetica", 10, "bold"))
+        self.tree.tag_configure('RECHAZADO', foreground='red', font=("Helvetica", 10, "bold"))
+        self.tree.tag_configure('FALTANTE', foreground='#d35400', font=("Helvetica", 10, "bold"))
+        self.tree.tag_configure('INTRUSO', foreground='purple', font=("Helvetica", 10, "bold"))
+        self.tree.tag_configure('SCRAP', foreground='gray', font=("Helvetica", 10, "bold", "overstrike"))
+
+        scrollbar = ttk.Scrollbar(container, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=scrollbar.set)
+        self.tree.pack(side='left', fill='both', expand=True)
+        scrollbar.pack(side='right', fill='y')
+
+    def ejecutar_revision_thread(self):
+        self.summary_label.config(text="Procesando lote... Por favor espera.", foreground="#0056b3")
+        self.tree.delete(*self.tree.get_children())
+        threading.Thread(target=self._proceso_revision, daemon=True).start()
+
+    def _proceso_revision(self):
+        ot_raw = self.ot_var.get().strip().upper()
+        total_raw = self.total_var.get().strip()
+
+        if not ot_raw or not total_raw.isdigit():
+            self.app.after(0, lambda: messagebox.showwarning("Datos Inválidos", "Ingrese una O.T. y cantidad de lote válida."))
+            self.app.after(0, lambda: self.summary_label.config(text="Error en los datos de entrada.", foreground="red"))
+            return
+
+        ot_num = re.sub(r'[^0-9]', '', ot_raw)  
+        ot_completa = f"JMO-{ot_num}"
+        total = int(total_raw)
+        self.detalles_auditoria = {}
+
+        # 1. Recopilar todas las bases de datos configuradas en la planta
+        rutas_bds = []
+        for key in ['db_path_jws1_1', 'db_path_jws1_2', 'db_path_jws1_3', 'db_path']:
+            path = self.app.config.get(key, '')
+            if path and os.path.exists(path) and path not in rutas_bds:
+                rutas_bds.append(path)
+
+        if not rutas_bds:
+            self.app.after(0, lambda: messagebox.showerror("Error", "No hay bases de datos configuradas o accesibles en red."))
+            self.app.after(0, lambda: self.summary_label.config(text="Error de conexión a BD.", foreground="red"))
+            return
+
+        consolidado = []
+        aprobados_count, rechazados_count, faltantes_count, scraps_count = 0, 0, 0, 0
+
+        try:
+            # --- NUEVO: Extraer TODOS los cables de la BD de una sola vez y comparar fechas ---
+            cables_en_bd = {}
+            for db_path in rutas_bds:
+                try:
+                    conn = sqlite3.connect(db_path, timeout=10)
+                    conn.row_factory = sqlite3.Row
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        SELECT * FROM cable_verifications 
+                        WHERE ot_number = ? OR serial_number LIKE ? 
+                        ORDER BY id ASC
+                    """, (ot_completa, f"%{ot_num}%"))
+                    
+                    for row in cursor.fetchall():
+                        sn = row['serial_number']
+                        row_dict = dict(row)
+                        
+                        if sn not in cables_en_bd:
+                            cables_en_bd[sn] = row_dict
+                        else:
+                            fecha_existente = cables_en_bd[sn].get('entry_date', '1900-01-01 00:00:00')
+                            fecha_nueva = row_dict.get('entry_date', '1900-01-01 00:00:00')
+                            if fecha_nueva > fecha_existente:
+                                cables_en_bd[sn] = row_dict
+                    conn.close()
+                except:
+                    pass
+
+            # --- CALCULAR EL LÍMITE REAL (Total esperado + Repuestos exactos por Scrap) ---
+            scraps_reales = sum(1 for row in cables_en_bd.values() if 'SCRAP' in row.get('overall_status', ''))
+            limite_secuencial = total + scraps_reales
+
+            # 2. Iterar SOLO desde el cable 1 hasta el límite lógico
+            for i in range(1, limite_secuencial + 1):
+                secuencial = str(i).zfill(4)
+                cable_visual = f"{ot_completa}{secuencial}"
+                
+                row_encontrado = cables_en_bd.get(cable_visual)
+
+                # 4. Procesar el resultado oficial directamente de la Base de Datos
+                if row_encontrado:
+                    sello_bd = row_encontrado['digital_seal'] if (row_encontrado['digital_seal'] and row_encontrado['digital_seal'] != "N/A") else row_encontrado['serial_number']
+                    estado_final = row_encontrado['overall_status']
+                    estado_ilrl = row_encontrado['ilrl_status']
+                    estado_geo = row_encontrado['geo_status']
+
+                    if estado_final in ['SCRAP', 'SCRAP CONFIRMADO']:
+                        sello_bd = "SCRAP CONFIRMADO"
+                        estado_final = "SCRAP CONFIRMADO"
+                        estado_ilrl = "SCRAP CONFIRMADO"
+                        estado_geo = "SCRAP CONFIRMADO"
+                        scraps_count += 1
+                    elif estado_final == 'SCRAP PENDIENTE':
+                        sello_bd = "SCRAP PENDIENTE"
+                        estado_final = "SCRAP PENDIENTE"
+                        estado_ilrl = "PENDIENTE"
+                        estado_geo = "PENDIENTE"
+                        scraps_count += 1
+                    elif estado_final == 'APROBADO':
+                        aprobados_count += 1
+                    else:
+                        rechazados_count += 1
+                else:
+                    sello_bd = "SIN SELLO (No escaneado)"
+                    estado_final = "FALTANTE"
+                    estado_ilrl = "FALTANTE"
+                    estado_geo = "FALTANTE"
+                    faltantes_count += 1
+
+                # Guardar en memoria para la interfaz y para el Excel de empaque
+                self.detalles_auditoria[cable_visual] = {
+                    'sello': sello_bd, 
+                    'final': estado_final,
+                    'ilrl': {'estado': estado_ilrl},
+                    'geo': {'estado': estado_geo}
+                }
+                consolidado.append((cable_visual, estado_ilrl, estado_geo, estado_final, sello_bd))
+
+            # Actualizar la interfaz visual. (Intrusos lo pasamos en 0, pues buscamos la secuencia exacta)
+            self.app.after(0, self._actualizar_ui, consolidado, aprobados_count, rechazados_count, faltantes_count, 0, scraps_count, total)
+
+        except Exception as e:
+            self.app.after(0, lambda: messagebox.showerror("Error", f"Falló la revisión:\n{e}"))
+            self.app.after(0, lambda: self.summary_label.config(text="Error en la consulta.", foreground="red"))
+
+    def _actualizar_ui(self, consolidado, aprobados, rechazados, faltantes, intrusos, scraps, total):
+        for row in consolidado:
+            self.tree.insert("", "end", values=row, tags=(row[3],))
+        
+        resumen = f"📦 LOTE | Meta: {total} | ✅ OK: {aprobados} | ❌ Rechazos: {rechazados} | ⚠️ Faltantes: {faltantes}"
+        if intrusos > 0: resumen += f" | 🚨 Intrusos: {intrusos}"
+        if scraps > 0: resumen += f" | 🗑️ Scrap: {scraps}"
+        
+        self.summary_label.config(text=resumen, foreground="black", font=("Helvetica", 12, "bold"))
+        self.btn_excel.config(state=tk.NORMAL)
+
+    def descargar_reporte_excel(self):
+        ot_num = re.sub(r'[^0-9]', '', self.ot_var.get())
+        ot_completa = f"JMO-{ot_num}"
+        total_esperado = int(self.total_var.get()) if self.total_var.get().isdigit() else 0
+
+        home = os.path.expanduser("~")
+        desktop_base = os.path.join(home, "Desktop")
+        for ruta in [os.path.join(home, "OneDrive", "Escritorio"), os.path.join(home, "OneDrive", "Desktop"), os.path.join(home, "Escritorio")]:
+            if os.path.exists(ruta): desktop_base = ruta; break
+
+        carpeta_reportes = os.path.join(desktop_base, "Reportes de Lote Empaque")
+        os.makedirs(carpeta_reportes, exist_ok=True)
+        ruta_completa = os.path.join(carpeta_reportes, f"Reporte_LOTE_{ot_completa}.xlsx")
+
+        try:
+            wb = Workbook()
+            ws_resumen = wb.active
+            ws_resumen.title = "Resumen de Lote"
+            
+            aprobados_count = sum(1 for d in self.detalles_auditoria.values() if d.get('final') == 'APROBADO')
+            intrusos = [c for c, d in self.detalles_auditoria.items() if d.get('final') == 'INTRUSO']
+            scraped_cables = [c for c, d in self.detalles_auditoria.items() if d.get('final') == 'SCRAP' or d.get('sello') == 'SCRAP']
+            sin_sello = [c for c, d in self.detalles_auditoria.items() if d.get('final') != 'SCRAP' and ("SIN SELLO" in str(d.get('sello')).upper() or "ERROR" in str(d.get('sello')).upper())]
+
+            ws_resumen['A1'] = f"REVISIÓN DE LOTE (EMPAQUE) - {ot_completa}"
+            ws_resumen['A1'].font = Font(size=16, bold=True, color="2C3E50")
+            
+            ws_resumen['A3'] = "Cantidad Consultada:"; ws_resumen['B3'] = total_esperado
+            ws_resumen['A4'] = "Cables Aprobados:"; ws_resumen['B4'] = aprobados_count
+            
+            ws_detalles = wb.create_sheet("Extracción de Sellos")
+            ws_detalles.append(["Cable (N.S.)", "Sello Digital (BD)", "ESTADO FINAL"])
+            
+            for col in ws_detalles[1]: 
+                col.fill = PatternFill(start_color="2C3E50", end_color="2C3E50", fill_type="solid")
+                col.font = Font(color="FFFFFF", bold=True)
+                col.alignment = Alignment(horizontal="center")
+
+            for cable, datos in self.detalles_auditoria.items():
+                ws_detalles.append([cable, datos.get('sello', 'N/A'), datos.get('final', 'N/A')])
+
+            for row in ws_detalles.iter_rows(min_row=2, max_col=3):
+                for cell in row: cell.alignment = Alignment(horizontal="center")
+                if row[2].value == "APROBADO": row[2].font = Font(color="006100", bold=True)
+                elif row[2].value in ["RECHAZADO", "INTRUSO"]: row[2].font = Font(color="9C0006", bold=True)
+                elif row[2].value == "SCRAP": row[2].font = Font(color="808080", bold=True)
+
+            ws_detalles.column_dimensions['A'].width = 20
+            ws_detalles.column_dimensions['B'].width = 25
+            ws_detalles.column_dimensions['C'].width = 18
+
+            wb.save(ruta_completa)
+            os.startfile(ruta_completa)
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Fallo al generar el Excel:\n{e}")
+
+class BuscadorSellos_Page(ttk.Frame):
+    def __init__(self, parent, app_instance):
+        super().__init__(parent, padding=20)
+        self.app = app_instance
+        self.create_widgets()
+
+    def create_widgets(self):
+        container = ttk.Frame(self, style='TFrame')
+        container.pack(expand=True, fill='both')
+
+        # --- Cabecera de Búsqueda ---
+        header_frame = ttk.Frame(container)
+        header_frame.pack(fill='x', pady=10)
+
+        ttk.Label(header_frame, text="Línea:", font=("Helvetica", 12, "bold")).pack(side='left', padx=5)
+        self.linea_var = tk.StringVar(value="JWS1-1")
+        linea_cb = ttk.Combobox(header_frame, textvariable=self.linea_var, values=["JWS1-1", "JWS1-2", "JWS1-3"], state="readonly", width=10, font=("Helvetica", 12))
+        linea_cb.pack(side='left', padx=(0, 15))
+
+        ttk.Label(header_frame, text="Sello Digital (13 dígitos):", font=("Helvetica", 12, "bold")).pack(side='left', padx=5)
+        
+        self.search_var = tk.StringVar()
+        self.search_var.trace_add("write", self._limitar_caracteres)
+        self.search_entry = ttk.Entry(header_frame, textvariable=self.search_var, font=("Helvetica", 14), width=20)
+        self.search_entry.pack(side='left', padx=10)
+        self.search_entry.bind("<Return>", lambda e: self.buscar_sello())
+        
+        ttk.Button(header_frame, text="Buscar Sello", command=self.buscar_sello, style='primary.TButton', padding=10).pack(side='left', padx=10)
+
+        # --- SECCIÓN DE SCRAP ---
+        scrap_frame = ttk.LabelFrame(container, text="Registro de Scrap (Cables Dañados/Irreparables)", padding=10)
+        scrap_frame.pack(fill='x', pady=5)
+
+        ttk.Label(scrap_frame, text="N.S. a Scrapear:", font=("Helvetica", 11, "bold")).pack(side='left', padx=5)
+        self.scrap_var = tk.StringVar()
+        ttk.Entry(scrap_frame, textvariable=self.scrap_var, font=("Helvetica", 12), width=18).pack(side='left', padx=5)
+
+        ttk.Label(scrap_frame, text="Nombre del Auditor:", font=("Helvetica", 11, "bold")).pack(side='left', padx=(15, 5))
+        self.auditor_var = tk.StringVar()
+        ttk.Entry(scrap_frame, textvariable=self.auditor_var, font=("Helvetica", 12), width=20).pack(side='left', padx=5)
+
+        ttk.Button(scrap_frame, text="🗑️ Mandar a Scrap", command=self.mandar_a_scrap, style='danger.TButton').pack(side='left', padx=15)
+
+        # --- NUEVA SECCIÓN DE RESTAURAR DE SCRAP ---
+        restore_frame = ttk.LabelFrame(container, text="Restaurar de Scrap (Revertir estado)", padding=10)
+        restore_frame.pack(fill='x', pady=5)
+
+        ttk.Label(restore_frame, text="N.S. a Restaurar:", font=("Helvetica", 11, "bold")).pack(side='left', padx=5)
+        self.restore_var = tk.StringVar()
+        ttk.Entry(restore_frame, textvariable=self.restore_var, font=("Helvetica", 12), width=18).pack(side='left', padx=5)
+
+        ttk.Label(restore_frame, text="Nombre del Auditor:", font=("Helvetica", 11, "bold")).pack(side='left', padx=(15, 5))
+        self.restore_auditor_var = tk.StringVar()
+        ttk.Entry(restore_frame, textvariable=self.restore_auditor_var, font=("Helvetica", 12), width=20).pack(side='left', padx=5)
+
+        ttk.Button(restore_frame, text="♻️ Sacar de Scrap", command=self.sacar_de_scrap, style='success.TButton').pack(side='left', padx=15)
+        # ------------------------------
+
+        # --- NUEVA SECCIÓN: ELIMINAR ERROR DE DEDO ---
+        delete_frame = ttk.LabelFrame(container, text="Eliminar Registro (Error de Dedo en Producción)", padding=10)
+        delete_frame.pack(fill='x', pady=5)
+
+        ttk.Label(delete_frame, text="N.S. a Eliminar:", font=("Helvetica", 11, "bold")).pack(side='left', padx=5)
+        self.delete_var = tk.StringVar()
+        ttk.Entry(delete_frame, textvariable=self.delete_var, font=("Helvetica", 12), width=18).pack(side='left', padx=5)
+
+        ttk.Label(delete_frame, text="Nombre del Auditor:", font=("Helvetica", 11, "bold")).pack(side='left', padx=(15, 5))
+        self.delete_auditor_var = tk.StringVar()
+        ttk.Entry(delete_frame, textvariable=self.delete_auditor_var, font=("Helvetica", 12), width=20).pack(side='left', padx=5)
+
+        ttk.Button(delete_frame, text="⚠️ Borrar Registro", command=self.borrar_registro, style='danger.Outline.TButton').pack(side='left', padx=15)
+        # ---------------------------------------------
+
+        # --- Área de Resultados ---
+        self.result_text = tk.Text(container, height=20, width=90, wrap="word", font=("Courier New", 11), state=tk.DISABLED, bg="#f8f9fa")
+        self.result_text.pack(fill='both', expand=True, pady=15)
+
+        self.result_text.tag_configure("titulo", font=("Helvetica", 16, "bold"), foreground="#2c3e50")
+        self.result_text.tag_configure("subtitulo", font=("Helvetica", 12, "bold"), foreground="#0056b3")
+        self.result_text.tag_configure("APROBADO", foreground="#28a745", font=("Helvetica", 14, "bold"))
+        self.result_text.tag_configure("RECHAZADO", foreground="#dc3545", font=("Helvetica", 14, "bold"))
+        self.result_text.tag_configure("SCRAP", foreground="#dc3545", font=("Helvetica", 14, "bold"))
+        self.result_text.tag_configure("normal", font=("Courier New", 11))
+        self.result_text.tag_configure("bold", font=("Courier New", 11, "bold"))
+    
+    def _limitar_caracteres(self, *args):
+        texto = self.search_var.get()
+        if len(texto) > 16:
+            self.search_var.set(texto[:16])
+
+    def mandar_a_scrap(self):
+        serie_raw = self.scrap_var.get().strip()
+        auditor = self.auditor_var.get().strip()
+        
+        if not auditor:
+            messagebox.showerror("Falta Auditor", "Es obligatorio ingresar el nombre del auditor que autoriza el scrap.", parent=self)
+            return
+
+        serie_numerica = re.sub(r'[^0-9]', '', serie_raw)
+        if len(serie_numerica) != 13:
+            messagebox.showerror("Formato Inválido", "El número de serie debe contener exactamente 13 dígitos para enviarse a Scrap.", parent=self)
+            return
+
+        linea_seleccionada = self.linea_var.get()
+        db_key = f"db_path_{linea_seleccionada.lower().replace('-', '_')}"
+        db_path = self.app.config.get(db_key, '')
+        
+        if not db_path or not os.path.exists(db_path):
+            messagebox.showerror("Error BD", f"Base de datos no encontrada para {linea_seleccionada}.")
+            return
+
+        prefijo_serie = "JRMO-" if "JRMO" in serie_raw.upper() else "JMO-"
+        serie_completa = f"{prefijo_serie}{serie_numerica}"
+        ot_completa = f"JMO-{serie_numerica[:9]}"
+
+        confirmacion = messagebox.askyesno(
+            "⚠️ Confirmar Scrap",
+            f"¿El auditor {auditor} autoriza mandar el cable:\n\n{serie_completa}\n\na SCRAP en la línea {linea_seleccionada}?",
+            parent=self, icon='warning'
+        )
+        if not confirmacion: return
+
+        try:
+            conn = sqlite3.connect(db_path, timeout=10)
+            cursor = conn.cursor()
+            
+            ilrl_details = json.dumps({'status': 'SCRAP CONFIRMADO', 'details': f'Confirmado/Enviado a scrap por el auditor: {auditor}', 'raw_data': []})
+            
+            cursor.execute("""
+                INSERT INTO cable_verifications (
+                    entry_date, serial_number, ot_number, overall_status,
+                    ilrl_status, ilrl_details, geo_status, geo_details, digital_seal
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                serie_completa, ot_completa, 'SCRAP CONFIRMADO',
+                'N/A (SCRAP CONFIRMADO)', ilrl_details, 'N/A (SCRAP CONFIRMADO)', ilrl_details, serie_completa
+            ))
+            conn.commit()
+            conn.close()
+
+            self.scrap_var.set("")
+            self.auditor_var.set("")
+            
+            try: winsound.Beep(300, 800)
+            except: pass
+            
+            messagebox.showinfo("Scrap Registrado", f"Cable {serie_completa} registrado como SCRAP exitosamente.", parent=self)
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo guardar en BD:\n{e}")
+
+    def sacar_de_scrap(self):
+        serie_raw = self.restore_var.get().strip()
+        auditor = self.restore_auditor_var.get().strip()
+
+        if not auditor:
+            messagebox.showerror("Falta Auditor", "Es obligatorio ingresar el nombre del auditor.", parent=self)
+            return
+
+        serie_numerica = re.sub(r'[^0-9]', '', serie_raw)
+        if len(serie_numerica) != 13:
+            messagebox.showerror("Formato Inválido", "El número de serie debe contener exactamente 13 dígitos.", parent=self)
+            return
+
+        # Poka-Yoke de Seguridad: Pedir contraseña de Calidad
+        pwd = simpledialog.askstring("Autorización Requerida", "Ingrese la contraseña de Calidad para sacar el cable de Scrap:", show='*', parent=self)
+        if pwd != "Calidad2024":
+            if pwd is not None: # Si el usuario no le dio a "Cancelar"
+                messagebox.showerror("Acceso Denegado", "Contraseña incorrecta.", parent=self)
+            return
+
+        linea_seleccionada = self.linea_var.get()
+        db_key = f"db_path_{linea_seleccionada.lower().replace('-', '_')}"
+        db_path = self.app.config.get(db_key, '')
+
+        if not db_path or not os.path.exists(db_path):
+            messagebox.showerror("Error BD", f"Base de datos no encontrada para {linea_seleccionada}.")
+            return
+
+        try:
+            conn = sqlite3.connect(db_path, timeout=10)
+            cursor = conn.cursor()
+
+            # 1. Verificar si el cable realmente se encuentra en Scrap actualmente
+            cursor.execute("""
+                SELECT overall_status FROM cable_verifications 
+                WHERE serial_number LIKE ? OR digital_seal LIKE ?
+                ORDER BY id DESC LIMIT 1
+            """, (f"%{serie_numerica}%", f"%{serie_numerica}%"))
+            
+            registro = cursor.fetchone()
+
+            if not registro or "SCRAP" not in registro[0]:
+                messagebox.showinfo("Aviso", "Este cable NO se encuentra en estado de SCRAP actualmente.", parent=self)
+                conn.close()
+                return
+
+            # 2. Eliminar de la base de datos los registros de Scrap de ese cable
+            # Esto hará que el último registro válido (APROBADO o RECHAZADO) vuelva a ser el estado oficial
+            cursor.execute("""
+                DELETE FROM cable_verifications 
+                WHERE (serial_number LIKE ? OR digital_seal LIKE ?) AND overall_status LIKE '%SCRAP%'
+            """, (f"%{serie_numerica}%", f"%{serie_numerica}%"))
+
+            conn.commit()
+            conn.close()
+
+            self.restore_var.set("")
+            self.restore_auditor_var.set("")
+
+            messagebox.showinfo("Restauración Exitosa", f"El cable ha sido retirado de SCRAP exitosamente por el auditor {auditor}.\n\nEl cable ha recuperado su estado anterior en la línea {linea_seleccionada}.", parent=self)
+
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo restaurar en BD:\n{e}")
+
+    def buscar_sello(self):
+        busqueda_raw = self.search_var.get().strip()
+        busqueda_numerica = re.sub(r'[^0-9]', '', busqueda_raw)
+
+        if not busqueda_numerica:
+            messagebox.showwarning("Búsqueda Vacía", "Por favor ingresa un número de serie válido.")
+            return
+
+        linea_seleccionada = self.linea_var.get()
+        db_key = f"db_path_{linea_seleccionada.lower().replace('-', '_')}"
+        db_path = self.app.config.get(db_key, '')
+
+        if not db_path or not os.path.exists(db_path):
+            messagebox.showerror("Base de Datos no encontrada", f"No se encuentra la base de datos para {linea_seleccionada}.")
+            return
+
+        self.result_text.config(state=tk.NORMAL)
+        self.result_text.delete(1.0, tk.END)
+
+        try:
+            conn = sqlite3.connect(db_path, timeout=10)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT entry_date, digital_seal, serial_number, ot_number, overall_status, 
+                       ilrl_status, ilrl_details, geo_status, geo_details
+                FROM cable_verifications 
+                WHERE digital_seal LIKE ? OR serial_number LIKE ?
+                ORDER BY id DESC LIMIT 1
+            """, (f"%{busqueda_numerica}%", f"%{busqueda_numerica}%"))
+            
+            registro = cursor.fetchone()
+            conn.close()
+
+            if not registro:
+                self.result_text.insert(tk.END, f"\nNo se encontró historial para el sello: {busqueda_numerica} en {linea_seleccionada}\n", "RECHAZADO")
+                self.result_text.config(state=tk.DISABLED)
+                return
+
+            # --- VALIDACIÓN SI ES SCRAP ---
+            estado_global = registro['overall_status']
+            if "SCRAP" in estado_global:
+                self.result_text.insert(tk.END, f"⚠️ CERTIFICADO ANULADO - {estado_global} ({linea_seleccionada}) ⚠️\n", "titulo")
+                self.result_text.insert(tk.END, "="*60 + "\n\n")
+                self.result_text.insert(tk.END, f"El cable {registro['serial_number']} fue reportado como DAÑADO/IRREPARABLE.\n\n", "SCRAP")
+                
+                try: 
+                    ilrl_dict = json.loads(registro['ilrl_details'])
+                    self.result_text.insert(tk.END, f"Motivo: {ilrl_dict.get('details', 'N/A')}\n", "normal")
+                except: pass
+                
+                self.result_text.insert(tk.END, f"Fecha de registro: {registro['entry_date']}\n\n", "normal")
+                self.result_text.config(state=tk.DISABLED)
+                return
+            # ------------------------------
+
+            sello_db = registro['digital_seal']
+            sello = registro['serial_number'] if (not sello_db or sello_db == "N/A") else sello_db
+            fecha = registro['entry_date']
+            ot = registro['ot_number']
+            
+            try: ilrl_dict = json.loads(registro['ilrl_details']) if registro['ilrl_details'] else {}
+            except: ilrl_dict = {}
+            try: geo_dict = json.loads(registro['geo_details']) if registro['geo_details'] else {}
+            except: geo_dict = {}
+
+            self.result_text.insert(tk.END, f"CERTIFICADO DE PRODUCTO ({linea_seleccionada})\n", "titulo")
+            self.result_text.insert(tk.END, "="*60 + "\n\n")
+            self.result_text.insert(tk.END, "Sello Digital: ", "bold")
+            self.result_text.insert(tk.END, f"{sello}\n", "normal")
+            self.result_text.insert(tk.END, "Orden (O.T.):  ", "bold")
+            self.result_text.insert(tk.END, f"{ot}\n", "normal")
+            self.result_text.insert(tk.END, "Fecha Verif.:  ", "bold")
+            self.result_text.insert(tk.END, f"{fecha}\n\n", "normal")
+            self.result_text.insert(tk.END, "ESTADO FINAL:  ", "bold")
+            self.result_text.insert(tk.END, f"{estado_global}\n\n", estado_global)
+            self.result_text.insert(tk.END, "="*60 + "\n\n")
+
+            self.result_text.insert(tk.END, "Resultados IL/RL:\n", "subtitulo")
+            self.result_text.insert(tk.END, f"  Estado:  {registro['ilrl_status']}\n", "normal")
+            self.result_text.insert(tk.END, f"  Detalle: {ilrl_dict.get('details', 'N/A').replace('Archivo:', '\\n  Archivo:')}\n\n", "normal")
+
+            self.result_text.insert(tk.END, "Resultados Geometría:\n", "subtitulo")
+            self.result_text.insert(tk.END, f"  Estado:  {registro['geo_status']}\n", "normal")
+            self.result_text.insert(tk.END, f"  Detalle: {geo_dict.get('details', 'N/A').replace('Archivo:', '\\n  Archivo:')}\n\n", "normal")
+
+        except Exception as e:
+            self.result_text.insert(tk.END, f"Error al consultar la base de datos:\n{str(e)}", "RECHAZADO")
+
+        self.result_text.config(state=tk.DISABLED)
+    def borrar_registro(self):
+        serie_raw = self.delete_var.get().strip()
+        auditor = self.delete_auditor_var.get().strip()
+
+        if not auditor:
+            messagebox.showerror("Falta Auditor", "Es obligatorio ingresar el nombre del auditor.", parent=self)
+            return
+
+        serie_numerica = re.sub(r'[^0-9]', '', serie_raw)
+        if len(serie_numerica) != 13:
+            messagebox.showerror("Formato Inválido", "El número de serie debe contener exactamente 13 dígitos.", parent=self)
+            return
+
+        # Poka-Yoke de Seguridad extrema
+        pwd = simpledialog.askstring("Autorización Requerida", "Ingrese la contraseña de Calidad para ELIMINAR PERMANENTEMENTE este registro:", show='*', parent=self)
+        if pwd != "Calidad2024":
+            if pwd is not None:
+                messagebox.showerror("Acceso Denegado", "Contraseña incorrecta.", parent=self)
+            return
+
+        linea_seleccionada = self.linea_var.get()
+        db_key = f"db_path_{linea_seleccionada.lower().replace('-', '_')}"
+        db_path = self.app.config.get(db_key, '')
+
+        if not db_path or not os.path.exists(db_path):
+            messagebox.showerror("Error BD", f"Base de datos no encontrada para {linea_seleccionada}.")
+            return
+
+        try:
+            conn = sqlite3.connect(db_path, timeout=10)
+            cursor = conn.cursor()
+
+            cursor.execute("SELECT id FROM cable_verifications WHERE serial_number LIKE ? OR digital_seal LIKE ?", (f"%{serie_numerica}%", f"%{serie_numerica}%"))
+            registro = cursor.fetchone()
+
+            if not registro:
+                messagebox.showinfo("Aviso", "No se encontró ningún registro para este cable.", parent=self)
+                conn.close()
+                return
+
+            # Eliminar de raíz
+            cursor.execute("DELETE FROM cable_verifications WHERE serial_number LIKE ? OR digital_seal LIKE ?", (f"%{serie_numerica}%", f"%{serie_numerica}%"))
+            conn.commit()
+            conn.close()
+
+            self.delete_var.set("")
+            self.delete_auditor_var.set("")
+
+            messagebox.showinfo("Eliminación Exitosa", f"El registro erróneo {serie_numerica} ha sido borrado permanentemente por {auditor}.", parent=self)
+
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo eliminar de la BD:\n{e}")
 
 if __name__ == "__main__":
     app = App()
