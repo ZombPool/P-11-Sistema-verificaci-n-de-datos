@@ -819,6 +819,8 @@ class App(ttk.Window):
                 cursor.execute("ALTER TABLE cable_verifications ADD COLUMN polaridad_details TEXT")
             if 'digital_seal' not in columns:
                 cursor.execute("ALTER TABLE cable_verifications ADD COLUMN digital_seal TEXT")
+            if 'pass_yield' not in columns:
+                cursor.execute("ALTER TABLE cable_verifications ADD COLUMN pass_yield TEXT DEFAULT 'N/A'")
 
             # --- Tabla de Configuraciones de OT para MPO ---
             cursor.execute("""
@@ -1066,12 +1068,36 @@ class DashboardPage(ttk.Frame):
         self.create_widgets()
 
     def create_widgets(self):
-        # --- AQUÍ ESTÁ LA CORRECCIÓN DEL PADDING ---
         container = ttk.Frame(self, style='TFrame', padding=10)
         container.pack(expand=True, fill='both')
 
-        ttk.Label(container, text="Bienvenido al Sistema de Trazabilidad FibraTrace.", font=("Helvetica", 16)).pack(pady=20)
-        ttk.Label(container, text="Selecciona una opción del menú de la izquierda para comenzar.", font=("Helvetica", 12)).pack(pady=10)
+        ttk.Label(container, text="Bienvenido al Sistema de Trazabilidad FibraTrace.", font=("Helvetica", 16)).pack(pady=15)
+
+        # =========================================================================
+        # --- NUEVA SECCIÓN: CONSULTA DE PASS YIELD EN VIVO (GEOMETRÍA) ---
+        # =========================================================================
+        py_frame = ttk.LabelFrame(container, text="📈 Consulta de Pass Yield en Vivo (Geometría)", padding=15)
+        py_frame.pack(fill='x', pady=10, padx=10)
+
+        # Buscador de O.T.
+        search_frame = ttk.Frame(py_frame)
+        search_frame.pack(fill='x', pady=(0, 10))
+
+        ttk.Label(search_frame, text="Número de O.T.:", font=("Helvetica", 11, "bold")).pack(side='left', padx=5)
+        self.ot_py_var = tk.StringVar()
+        ttk.Entry(search_frame, textvariable=self.ot_py_var, font=("Helvetica", 12), width=20).pack(side='left', padx=5)
+        ttk.Button(search_frame, text="🔍 Buscar Pass Yield", command=self.buscar_pass_yield, style='primary.TButton').pack(side='left', padx=15)
+
+        # Área de Resultados
+        res_frame = ttk.Frame(py_frame)
+        res_frame.pack(fill='x', pady=5)
+        
+        ttk.Label(res_frame, text="Rendimiento (Yield):", font=("Helvetica", 12, "bold")).pack(side='left', padx=5)
+        self.lbl_py_resultado = ttk.Label(res_frame, text="---", font=("Helvetica", 24, "bold"), foreground="gray")
+        self.lbl_py_resultado.pack(side='left', padx=20)
+        
+        self.lbl_py_fecha = ttk.Label(res_frame, text="", font=("Helvetica", 10, "italic"), foreground="#555555")
+        self.lbl_py_fecha.pack(side='left', padx=20)
 
         # =========================================================================
         # --- SECCIÓN: CONTROL DE VALIDACIONES (BYPASS TEMPORAL) ---
@@ -1101,7 +1127,10 @@ class DashboardPage(ttk.Frame):
             def guardar_cambios_bypass(k=linea_key, v_i=var_ilrl, v_g=var_geo):
                 self.app.config[f'val_ilrl_{k}'] = v_i.get()
                 self.app.config[f'val_geo_{k}'] = v_g.get()
-                self.app.save_config(self.app.config)
+                try:
+                    self.app.save_config(self.app.config)
+                except:
+                    pass # Evita errores si la función no está disponible globalmente
             
             chk_ilrl = ttk.Checkbutton(frame_linea, text="IL/RL (Activo)", variable=var_ilrl, bootstyle="success-round-toggle", command=guardar_cambios_bypass)
             chk_ilrl.pack(anchor='w', pady=5)
@@ -1110,8 +1139,105 @@ class DashboardPage(ttk.Frame):
             chk_geo.pack(anchor='w', pady=5)
         # =========================================================================
 
-        version_label = ttk.Label(self, text=f"Versión {__version__}", font=("Helvetica", 10), style='secondary.TLabel')
+        # Si __version__ no está definida, ponemos una genérica temporal
+        try: ver_text = f"Versión {__version__}" 
+        except: ver_text = "Versión 1.2.x"
+        
+        version_label = ttk.Label(self, text=ver_text, font=("Helvetica", 10), style='secondary.TLabel')
         version_label.pack(side='bottom', pady=10, anchor='se')
+
+    def buscar_pass_yield(self):
+        """Busca el archivo más reciente de una O.T. y extrae el valor de Pass Percent."""
+        ot_raw = self.ot_py_var.get().strip().upper()
+        if not ot_raw:
+            messagebox.showwarning("Falta OT", "Ingrese una O.T. para buscar.", parent=self)
+            return
+            
+        # Normalizar O.T. (Extraemos los números y le pegamos el prefijo JMO-)
+        numeros = re.sub(r'[^0-9]', '', ot_raw)
+        ot_completa = f"JMO-{numeros}" if numeros else ot_raw
+
+        self.lbl_py_resultado.config(text="Buscando...", foreground="gray")
+        self.lbl_py_fecha.config(text="")
+        self.update_idletasks() # Forzar actualización visual
+
+        # 1. Obtener rutas de geometría
+        rutas_base = [self.app.config.get('ruta_base_geo', '')]
+        if self.app.config.get('ruta_base_geo_2'):
+            rutas_base.append(self.app.config.get('ruta_base_geo_2'))
+            
+        archivos_candidatos = []
+        for ruta in rutas_base:
+            if not os.path.isdir(ruta): continue
+            # Buscar archivos que pertenezcan a esta O.T.
+            encontrados = [os.path.join(ruta, f) for f in os.listdir(ruta) 
+                           if f.lower().endswith(('.xlsx', '.xls', '.csv')) 
+                           and not f.startswith('~$') 
+                           and 'conflict' not in f.lower()
+                           and ot_completa in f.upper()]
+            archivos_candidatos.extend(encontrados)
+            
+        if not archivos_candidatos:
+            self.lbl_py_resultado.config(text="N/A", foreground="red")
+            self.lbl_py_fecha.config(text=f"No se encontraron reportes de Geometría para {ot_completa}.")
+            return
+            
+        # 2. Filtrar el archivo MODIFICADO MÁS RECIENTEMENTE (Garantiza el Pass Yield más actual)
+        archivo_reciente = max(archivos_candidatos, key=os.path.getmtime)
+        
+        try:
+            # 3. Leer el archivo con Pandas
+            if archivo_reciente.lower().endswith('.csv'):
+                df = pd.read_csv(archivo_reciente, header=None)
+            else:
+                df = pd.read_excel(archivo_reciente, sheet_name=0, header=None)
+                
+            pass_yield = None
+            
+            # 4. Buscar la fila "Pass Percent" dinámicamente sin importar si es SANA 1.0 o 2.0
+            for index, row in df.iterrows():
+                if len(row) > 1 and "PASS PERCENT" in str(row[0]).strip().upper():
+                    # Recorrer las columnas a la derecha hasta encontrar el primer número válido
+                    for col_idx in range(1, len(row)):
+                        val = str(row[col_idx]).strip()
+                        if val and val.lower() != 'nan':
+                            try:
+                                val_float = float(val)
+                                # Si es formato decimal (ej. 0.98), lo hacemos porcentaje. Si ya viene entero, se queda igual.
+                                pass_yield = val_float * 100 if val_float <= 1.0 else val_float
+                                break # ¡Encontramos el porcentaje, dejamos de buscar!
+                            except ValueError:
+                                continue # Si es texto vacío, pasa a la siguiente celda
+                    break
+                    
+            if pass_yield is not None:
+                # 5. Imprimir en Pantalla
+                fecha_busqueda = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                fecha_archivo = datetime.fromtimestamp(os.path.getmtime(archivo_reciente)).strftime("%Y-%m-%d %H:%M:%S")
+                
+                if isinstance(pass_yield, float):
+                    # Semáforo de colores: Verde >= 96%, Naranja [90% - 95.99%], Rojo < 90%
+                    if pass_yield >= 96.0:
+                        color = "green"
+                    elif pass_yield >= 90.0:
+                        color = "orange"
+                    else:
+                        color = "red"
+                    
+                    self.lbl_py_resultado.config(text=f"{pass_yield:.2f}%", foreground=color)
+                else:
+                    self.lbl_py_resultado.config(text=f"{pass_yield}", foreground="blue")
+                    
+                self.lbl_py_fecha.config(text=f"Archivo leído: {os.path.basename(archivo_reciente)}\n"
+                                              f"Última actualización de mediciones: {fecha_archivo}\n"
+                                              f"Consulta realizada: {fecha_busqueda}")
+            else:
+                self.lbl_py_resultado.config(text="Error", foreground="red")
+                self.lbl_py_fecha.config(text="No se encontró la fila 'Pass Percent' en el archivo más reciente.")
+                
+        except Exception as e:
+            self.lbl_py_resultado.config(text="Error", foreground="red")
+            self.lbl_py_fecha.config(text=f"No se pudo leer el archivo:\n{e}")
 
 class VerificacionLC_SC_Page(ttk.Frame):
     def __init__(self, parent, app_instance):
@@ -1208,8 +1334,8 @@ class VerificacionLC_SC_Page(ttk.Frame):
             cursor.execute("""
                 INSERT INTO cable_verifications (
                     entry_date, serial_number, ot_number, overall_status,
-                    ilrl_status, ilrl_details, geo_status, geo_details, digital_seal
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ilrl_status, ilrl_details, geo_status, geo_details, digital_seal, pass_yield
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 log_data['serial_number'],
@@ -1219,7 +1345,8 @@ class VerificacionLC_SC_Page(ttk.Frame):
                 json.dumps(log_data['ilrl_details']),
                 log_data['geo_status'],
                 json.dumps(log_data['geo_details']),
-                log_data.get('digital_seal', 'N/A') # <--- Guardado en BD
+                log_data.get('digital_seal', 'N/A'),
+                log_data.get('pass_yield', 'N/A') # <--- NUEVO VALOR A GUARDAR
             ))
             conn.commit()
             conn.close()
@@ -1396,7 +1523,7 @@ class VerificacionLC_SC_Page(ttk.Frame):
         if val_geo_activa:
             self.last_geo_result = self.buscar_y_procesar_geo(ot_numero, serie_cable, current_mode)
         else:
-            self.last_geo_result = {'status': 'APROBADO', 'details': 'BYPASS ACTIVO: Omitido desde Dashboard.', 'raw_data': []}
+            self.last_geo_result = {'status': 'APROBADO', 'details': 'BYPASS ACTIVO: Omitido desde Dashboard.', 'raw_data': [], 'pass_yield': 'BYPASS'}
         # =========================================================================
         
         self.mostrar_resultado("IL/RL", self.last_ilrl_result)
@@ -1439,7 +1566,8 @@ class VerificacionLC_SC_Page(ttk.Frame):
             'ilrl_details': self.last_ilrl_result,
             'geo_status': self.last_geo_result['status'],
             'geo_details': self.last_geo_result,
-            'digital_seal': sello_digital 
+            'digital_seal': sello_digital,
+            'pass_yield': self.last_geo_result.get('pass_yield', 'N/A')
         }
         self._log_verification(log_data)
 
@@ -1687,108 +1815,131 @@ class VerificacionLC_SC_Page(ttk.Frame):
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo abrir la carpeta del archivo:\n{e}", parent=self)
     
-    def procesar_multiples_archivos_geo(self, lista_archivos, serie_objetivo, mode):
-        try:
-            puntas_requeridas = ['1', '2'] if mode == "Simplex" else ['1', '2', '3', '4']
-            sana_version = self.sana_var.get() # <--- Capturamos versión SANA
+    def procesar_multiples_archivos_geo(self, archivos, serie_objetivo, mode):
+        serie_objetivo_norm = re.sub(r'[^0-9]', '', serie_objetivo)
+        ot_completa = f"JMO-{serie_objetivo_norm[:9]}"
+        
+        # Variable para almacenar ÚNICAMENTE la medición más reciente
+        latest_measurement = None
+        max_fecha_obj = None # <-- NUEVA VARIABLE: Guarda el objeto solo para comparar
 
-            serie_objetivo_norm = re.sub(r'[^0-9]', '', serie_objetivo)
-            ot_completa = f"JMO-{serie_objetivo_norm[:9]}" 
-            secuencial_buscado = serie_objetivo_norm[-4:] 
-            
-            todas_mediciones = [] 
-            puntas_encontradas_map = {} 
-            archivos_usados = set()
-
-            for ruta in lista_archivos:
-                try:
-                    df = pd.read_excel(ruta, header=None, skiprows=12)
+        for archivo in archivos:
+            try:
+                # Soporte para CSV y Excel
+                if str(archivo).lower().endswith('.csv'):
+                    df = pd.read_csv(archivo, header=None)
+                else:
+                    df = pd.read_excel(archivo, sheet_name=0, header=None)
                     
-                    for _, row in df.iterrows():
-                        if len(row) < 9: continue
-
-                        # --- NUEVA BIFURCACIÓN INTELIGENTE (Auto-detección) ---
-                        s_upper = str(row[0]).strip().upper()
+                for index, row in df.iterrows():
+                    if len(row) < 7: continue 
+                    
+                    s_upper = str(row[0]).strip().upper()
+                    
+                    # 1er Intento: Formato Clásico / SANA 2.0
+                    match_sana1 = re.search(r'(J(?:R)?MO-?\d{13}|\d{13})(-?([1-4R][1-4]?))?', s_upper)
+                    
+                    if match_sana1 and match_sana1.group(3):
+                        base_serial_numeric = re.sub(r'[^0-9]', '', match_sana1.group(1))
+                        punta_original = match_sana1.group(3)
                         
-                        # 1er Intento: Formato SANA 1.0
-                        match_sana1 = re.search(r'(J(?:R)?MO-?\d{13}|\d{13})(-?([1-4R][1-4]?))?', s_upper)
+                        resultado_raw = "FAIL"
+                        for col_idx in range(5, min(15, len(row))):
+                            cell_val = str(row[col_idx]).strip().upper()
+                            if cell_val in ["PASS", "FAIL"]:
+                                resultado_raw = cell_val
+                                break
+                                
+                    # 2do Intento: Formato Antiguo SANA
+                    elif ot_completa in s_upper:
+                        sec_raw = re.sub(r'[^0-9]', '', str(row[1]).strip())
+                        if not sec_raw: continue
+                        base_serial_numeric = serie_objetivo_norm[:9] + sec_raw.zfill(4)
+                        punta_original = str(row[2]).strip().upper()
                         
-                        if match_sana1 and match_sana1.group(3):
-                            base_serial_numeric = re.sub(r'[^0-9]', '', match_sana1.group(1))
-                            punta_original = match_sana1.group(3)
-                            fuente_texto = s_upper
-                            resultado_raw = str(row[6]).upper() if len(row) > 6 and pd.notna(row[6]) else "FAIL"
+                        resultado_raw = "FAIL"
+                        for col_idx in range(5, min(15, len(row))):
+                            cell_val = str(row[col_idx]).strip().upper()
+                            if cell_val in ["PASS", "FAIL"]:
+                                resultado_raw = cell_val
+                                break
+                    else:
+                        continue
+                    
+                    # Si coincide con el cable que estamos buscando
+                    if serie_objetivo_norm == base_serial_numeric and punta_original != "N/A":
+                        resultado = "PASS" if "PASS" in resultado_raw else "FAIL"
+                        
+                        fecha_str = "1900-01-01"
+                        hora_str = "00:00:00"
+                        for cell in row:
+                            cell_str = str(cell).strip()
+                            if re.match(r'^\d{4}-\d{2}-\d{2}$', cell_str):
+                                fecha_str = cell_str
+                            elif re.match(r'^\d{2}:\d{2}:\d{2}$', cell_str):
+                                hora_str = cell_str
+                                
+                        try:
+                            fecha_hora = datetime.strptime(f"{fecha_str} {hora_str}", "%Y-%m-%d %H:%M:%S")
+                        except:
+                            fecha_hora = datetime.now() 
                             
-                        # 2do Intento: Formato SANA 2.0
-                        elif ot_completa in s_upper:
-                            sec_raw = re.sub(r'[^0-9]', '', str(row[1]).strip())
-                            if not sec_raw: continue
-                            base_serial_numeric = serie_objetivo_norm[:9] + sec_raw.zfill(4)
-                            punta_original = str(row[2]).strip().upper()
-                            fuente_texto = f"{s_upper} {sec_raw}"
-                            resultado_raw = str(row[8]).upper() if len(row) > 8 and pd.notna(row[8]) else "FAIL"
-                            
-                        else:
-                            continue # Si no es ningún formato, pasamos a la siguiente fila
-                        # --------------------------------------------------------
-
-                        if serie_objetivo_norm == base_serial_numeric and punta_original != "N/A":
-                            resultado = "PASS" if "PASS" in resultado_raw else "FAIL"
-                            
-                            punta_limpia = punta_original.replace('R', '').replace('-', '')
-                            es_retrabajo = 'R' in punta_original
-
-                            datos_medicion = {
-                                'punta_original': punta_original,
-                                'punta_limpia': punta_limpia,
+                        # === AQUÍ ESTÁ LA SOLUCIÓN DEL ERROR JSON ===
+                        # Comparamos usando el objeto, pero guardamos como texto plano
+                        if max_fecha_obj is None or fecha_hora > max_fecha_obj:
+                            max_fecha_obj = fecha_hora
+                            latest_measurement = {
+                                'punta': punta_original,
                                 'resultado': resultado,
-                                'fuente': fuente_texto,
-                                'archivo': os.path.basename(ruta),
-                                'es_retrabajo': es_retrabajo
+                                'fecha': fecha_hora.strftime("%Y-%m-%d %H:%M:%S"), # Texto seguro para JSON
+                                'fuente': os.path.basename(archivo)
                             }
                             
-                            todas_mediciones.append(datos_medicion)
-                            archivos_usados.add(os.path.basename(ruta))
+            except Exception as e:
+                print(f"Error procesando archivo Geo {archivo}: {e}")
 
-                            if punta_limpia not in puntas_encontradas_map:
-                                puntas_encontradas_map[punta_limpia] = datos_medicion
-                            else:
-                                existente = puntas_encontradas_map[punta_limpia]
-                                if es_retrabajo and not existente['es_retrabajo']:
-                                    puntas_encontradas_map[punta_limpia] = datos_medicion
-                                elif es_retrabajo == existente['es_retrabajo']:
-                                    puntas_encontradas_map[punta_limpia] = datos_medicion
+        # =====================================================================
+        # EVALUACIÓN FINAL DEL PASS YIELD
+        # =====================================================================
+        # --- EXTRAER EL PASS YIELD DEL ARCHIVO MÁS RECIENTE (Multiformato) ---
+        pass_yield_str = "N/A"
+        if archivos:
+            archivo_reciente_py = max(archivos, key=os.path.getmtime)
+            try:
+                if archivo_reciente_py.lower().endswith('.csv'):
+                    df_py = pd.read_csv(archivo_reciente_py, header=None)
+                else:
+                    df_py = pd.read_excel(archivo_reciente_py, sheet_name=0, header=None)
+                    
+                for index, row in df_py.iterrows():
+                    if len(row) > 1 and "PASS PERCENT" in str(row[0]).strip().upper():
+                        for col_idx in range(1, len(row)):
+                            val = str(row[col_idx]).strip()
+                            if val and val.lower() != 'nan':
+                                try:
+                                    val_float = float(val)
+                                    py_num = val_float * 100 if val_float <= 1.0 else val_float
+                                    pass_yield_str = f"{py_num:.2f}%"
+                                    break
+                                except ValueError:
+                                    continue
+                        break
+            except Exception as e:
+                pass_yield_str = "Error lectura"
 
-                except Exception as e:
-                    print(f"Error leyendo archivo {ruta}: {e}")
-
-            # --- EVALUACIÓN FINAL ---
-            if not puntas_encontradas_map:
-                return {'status': 'NO ENCONTRADO', 'details': 'No hay mediciones para este serial en los archivos revisados.', 'raw_data': []}
-
-            status = 'APROBADO'
-            missing_puntas = []
+        if latest_measurement:
+            status_final = "APROBADO" if latest_measurement['resultado'] == "PASS" else "RECHAZADO"
             
-            for p_req in puntas_requeridas:
-                if p_req not in puntas_encontradas_map:
-                    status = 'RECHAZADO'
-                    missing_puntas.append(p_req)
-                elif puntas_encontradas_map[p_req]['resultado'] != 'PASS':
-                    status = 'RECHAZADO'
+            # Detalle amigable para el operador e historial
+            detalles = (f"1/1 punta verificada (Método Pass Yield).\n"
+                        f"Punta detectada: {latest_measurement['punta']}\n"
+                        f"Fecha de medición: {latest_measurement['fecha']}\n"
+                        f"Pass Yield (O.T.): {pass_yield_str}\n" 
+                        f"Archivo: {latest_measurement['fuente']}")
             
-            pass_count = sum(1 for p in puntas_requeridas if p in puntas_encontradas_map and puntas_encontradas_map[p]['resultado'] == 'PASS')
-            
-            details = f"{pass_count}/{len(puntas_requeridas)} puntas OK."
-            if missing_puntas: details += f" Faltan: {', '.join(missing_puntas)}."
-            details += f" Fuentes: {', '.join(list(archivos_usados))}"
-            
-            raw_data_formatted = [{'punta': m['punta_original'], 'resultado': m['resultado'], 'fuente': f"{m['fuente']} ({m['archivo']})"} for m in todas_mediciones]
-            ruta_principal = lista_archivos[0] if lista_archivos else ""
-
-            return {'status': status, 'details': details, 'raw_data': raw_data_formatted, 'file_path': ruta_principal}
-
-        except Exception as e:
-            return {'status': 'ERROR', 'details': f'Fallo al procesar múltiples archivos: {e}', 'raw_data': []}
+            return {'status': status_final, 'details': detalles, 'raw_data': [latest_measurement], 'pass_yield': pass_yield_str}
+        else:
+            return {'status': 'NO ENCONTRADO', 'details': f'No se encontraron mediciones de Geometría para {serie_objetivo}.', 'raw_data': [], 'pass_yield': 'N/A'}
 
 class RegistroWHMPO_Page(ttk.Frame):
     def __init__(self, parent, app_instance):
@@ -2776,13 +2927,16 @@ class RecordsPage(ttk.Frame):
         self.filter_entry.pack(side='left', padx=5)
         self.filter_entry.bind("<KeyRelease>", lambda e: self.load_records())
 
-        cols = ("ID", "Fecha", "No. Serie", "OT", "Estado Final", "ILRL", "GEO", "Polaridad")
+        # --- SE AGREGA 'Pass Yield' AL FINAL ---
+        cols = ("ID", "Fecha", "No. Serie", "OT", "Estado Final", "ILRL", "GEO", "Polaridad", "Pass Yield")
         self.tree = ttk.Treeview(self, columns=cols, show="headings", style='primary.Treeview')
         for col in cols:
             self.tree.heading(col, text=col)
-            self.tree.column(col, width=120, anchor='w')
+            # Damos anchos distintos para que quepa bien
+            ancho = 100 if col == "Pass Yield" else (120 if col != "ID" else 40)
+            self.tree.column(col, width=ancho, anchor='center' if col == "Pass Yield" else 'w')
         
-        self.tree.column("ID", width=40, stretch=False)
+        self.tree.column("ID", stretch=False)
         self.tree.pack(fill='both', expand=True, pady=10)
 
         self.tree.tag_configure('APROBADO', foreground='green')
@@ -2797,7 +2951,9 @@ class RecordsPage(ttk.Frame):
         try:
             conn = sqlite3.connect(self.app.config['db_path'])
             cursor = conn.cursor()
-            query = "SELECT id, entry_date, serial_number, ot_number, overall_status, ilrl_status, geo_status, polaridad_status FROM cable_verifications"
+            
+            # --- SE SOLICITA LA NUEVA COLUMNA EN LA BÚSQUEDA ---
+            query = "SELECT id, entry_date, serial_number, ot_number, overall_status, ilrl_status, geo_status, polaridad_status, pass_yield FROM cable_verifications"
             params = []
             if filtro:
                 query += " WHERE serial_number LIKE ? OR ot_number LIKE ?"
@@ -2806,9 +2962,13 @@ class RecordsPage(ttk.Frame):
             
             cursor.execute(query, params)
             for row in cursor.fetchall():
-                row_list = list(row)
-                while len(row_list) < 8:
+                # Reemplazamos los 'None' (cables viejos antes de esta actualización) por 'N/A'
+                row_list = [val if val is not None else 'N/A' for val in row]
+                
+                # Por si la base de datos devuelve menos columnas por alguna falla estructural
+                while len(row_list) < 9:
                     row_list.append('N/A')
+                    
                 self.tree.insert("", "end", values=tuple(row_list), tags=(row[4],))
             conn.close()
         except Exception as e:
@@ -2904,42 +3064,48 @@ class SettingsWindow(tk.Toplevel):
         ttk.Entry(frame, textvariable=self.geo_uniboot_path, width=60).grid(row=16, column=1, sticky='ew', padx=5)
         ttk.Button(frame, text="...", command=lambda: self.browse_folder(self.geo_uniboot_path)).grid(row=16, column=2, padx=5)
 
-        ttk.Separator(frame).grid(row=17, column=0, columnspan=3, pady=10, sticky='ew')
+        # --- NUEVA RUTA: POLARIDAD UNIBOOT ---
+        ttk.Label(frame, text="Ruta Polaridad (Uniboot):").grid(row=17, column=0, sticky='w', pady=2)
+        self.pol_uniboot_path = tk.StringVar(value=self.app.config.get('ruta_base_polaridad_uniboot', ''))
+        ttk.Entry(frame, textvariable=self.pol_uniboot_path, width=60).grid(row=17, column=1, sticky='ew', padx=5)
+        ttk.Button(frame, text="...", command=lambda: self.browse_folder(self.pol_uniboot_path)).grid(row=17, column=2, padx=5)
+
+        ttk.Separator(frame).grid(row=18, column=0, columnspan=3, pady=10, sticky='ew')
 
         # --- SECCIÓN DE BASES DE DATOS (SYNOLOGY) ---
-        ttk.Label(frame, text="Rutas Bases de Datos (LC/SC)", font=("Helvetica", 10, "bold")).grid(row=18, column=0, columnspan=3, sticky='w', pady=(0,5))
+        ttk.Label(frame, text="Rutas Bases de Datos (LC/SC)", font=("Helvetica", 10, "bold")).grid(row=19, column=0, columnspan=3, sticky='w', pady=(0,5))
         
-        ttk.Label(frame, text="Línea JWS1-1:").grid(row=19, column=0, sticky='w', pady=2)
+        ttk.Label(frame, text="Línea JWS1-1:").grid(row=20, column=0, sticky='w', pady=2)
         self.db_path_1 = tk.StringVar(value=self.app.config.get('db_path_jws1_1', ''))
-        ttk.Entry(frame, textvariable=self.db_path_1, width=60).grid(row=19, column=1, sticky='ew', padx=5)
-        ttk.Button(frame, text="...", command=lambda: self.browse_db_file(self.db_path_1)).grid(row=19, column=2, padx=5)
+        ttk.Entry(frame, textvariable=self.db_path_1, width=60).grid(row=20, column=1, sticky='ew', padx=5)
+        ttk.Button(frame, text="...", command=lambda: self.browse_db_file(self.db_path_1)).grid(row=20, column=2, padx=5)
 
-        ttk.Label(frame, text="Línea JWS1-2:").grid(row=20, column=0, sticky='w', pady=2)
+        ttk.Label(frame, text="Línea JWS1-2:").grid(row=21, column=0, sticky='w', pady=2)
         self.db_path_2 = tk.StringVar(value=self.app.config.get('db_path_jws1_2', ''))
-        ttk.Entry(frame, textvariable=self.db_path_2, width=60).grid(row=20, column=1, sticky='ew', padx=5)
-        ttk.Button(frame, text="...", command=lambda: self.browse_db_file(self.db_path_2)).grid(row=20, column=2, padx=5)
+        ttk.Entry(frame, textvariable=self.db_path_2, width=60).grid(row=21, column=1, sticky='ew', padx=5)
+        ttk.Button(frame, text="...", command=lambda: self.browse_db_file(self.db_path_2)).grid(row=21, column=2, padx=5)
 
-        ttk.Label(frame, text="Línea JWS1-3:").grid(row=21, column=0, sticky='w', pady=2)
+        ttk.Label(frame, text="Línea JWS1-3:").grid(row=22, column=0, sticky='w', pady=2)
         self.db_path_3 = tk.StringVar(value=self.app.config.get('db_path_jws1_3', ''))
-        ttk.Entry(frame, textvariable=self.db_path_3, width=60).grid(row=21, column=1, sticky='ew', padx=5)
-        ttk.Button(frame, text="...", command=lambda: self.browse_db_file(self.db_path_3)).grid(row=21, column=2, padx=5)
+        ttk.Entry(frame, textvariable=self.db_path_3, width=60).grid(row=22, column=1, sticky='ew', padx=5)
+        ttk.Button(frame, text="...", command=lambda: self.browse_db_file(self.db_path_3)).grid(row=22, column=2, padx=5)
 
-        ttk.Separator(frame).grid(row=22, column=0, columnspan=3, pady=10, sticky='ew')
+        ttk.Separator(frame).grid(row=23, column=0, columnspan=3, pady=10, sticky='ew')
 
-        ttk.Label(frame, text="BD Local/General (MPO/Fanout):").grid(row=23, column=0, sticky='w', pady=2)
+        ttk.Label(frame, text="BD Local/General (MPO/Fanout):").grid(row=24, column=0, sticky='w', pady=2)
         self.db_path = tk.StringVar(value=self.app.config.get('db_path', ''))
-        ttk.Entry(frame, textvariable=self.db_path, width=60).grid(row=23, column=1, sticky='ew', padx=5)
-        ttk.Button(frame, text="...", command=lambda: self.browse_db_file(self.db_path)).grid(row=23, column=2, padx=5)
+        ttk.Entry(frame, textvariable=self.db_path, width=60).grid(row=24, column=1, sticky='ew', padx=5)
+        ttk.Button(frame, text="...", command=lambda: self.browse_db_file(self.db_path)).grid(row=24, column=2, padx=5)
         
         # --- Configuración de Identidad de la Línea ---
-        ttk.Separator(frame).grid(row=24, column=0, columnspan=3, pady=10, sticky='ew')
-        ttk.Label(frame, text="Línea de esta PC (Estación):", font=("Helvetica", 10, "bold")).grid(row=25, column=0, sticky='w', pady=2)
+        ttk.Separator(frame).grid(row=25, column=0, columnspan=3, pady=10, sticky='ew')
+        ttk.Label(frame, text="Línea de esta PC (Estación):", font=("Helvetica", 10, "bold")).grid(row=26, column=0, sticky='w', pady=2)
         self.linea_actual_var = tk.StringVar(value=self.app.config.get('linea_actual', 'JWS1-1'))
         cb_linea = ttk.Combobox(frame, textvariable=self.linea_actual_var, values=["JWS1-1", "JWS1-2", "JWS1-3"], state="readonly", width=15)
-        cb_linea.grid(row=25, column=1, sticky='w', padx=5)
+        cb_linea.grid(row=26, column=1, sticky='w', padx=5)
         
         btn_frame = ttk.Frame(frame)
-        btn_frame.grid(row=26, column=0, columnspan=3, pady=20)
+        btn_frame.grid(row=27, column=0, columnspan=3, pady=20)
         ttk.Button(btn_frame, text="Guardar", command=self.save_and_close, style='success.TButton').pack(side='left', padx=10)
         ttk.Button(btn_frame, text="Cancelar", command=self.destroy, style='danger.TButton').pack(side='left', padx=10)
         
@@ -2976,7 +3142,8 @@ class SettingsWindow(tk.Toplevel):
             "db_path_jws1_3": self.db_path_3.get(),
             "ruta_base_geo_fanout_lc": self.geo_fanout_path.get(),
             "ruta_base_ilrl_uniboot": self.ilrl_uniboot_path.get(),
-            "ruta_base_geo_uniboot": self.geo_uniboot_path.get()
+            "ruta_base_geo_uniboot": self.geo_uniboot_path.get(),
+            "ruta_base_polaridad_uniboot": self.pol_uniboot_path.get()
         }
         self.app.save_config(new_config)
         messagebox.showinfo("Guardado", "La configuración se ha guardado correctamente.")
@@ -4769,8 +4936,12 @@ class DetailsWindow(tk.Toplevel):
                 values_list = [(item.get('conector'), item.get('resultado'), item.get('serie_completo')) for item in raw_data]
                 return cols, values_list
         
-        elif analysis_type == "polaridad":
-            return ("Propiedad", "Valor"), list(data.get('raw_data', {}).items())
+        elif analysis_type in ["polaridad", "pol"]:
+            raw_val = data.get('raw_data', {})
+            # Si viene como lista (caso Uniboot), extraemos el primer diccionario
+            if isinstance(raw_val, list) and len(raw_val) > 0:
+                raw_val = raw_val[0]
+            return ("Propiedad", "Valor"), list(raw_val.items())
         
         return (), []
 
@@ -4913,40 +5084,52 @@ class VerificacionUniboot_Page(ttk.Frame):
         self.result_text.insert(tk.END, f"Verificando UNIBOOT {serie_cable} en OT {ot_numero} (Modo: {current_mode})...\n", "header")
         self.result_text.insert(tk.END, "-"*60 + "\n\n")
 
-        # 1. IL/RL (Lógica LC/SC)
-        self.last_ilrl_result = self.buscar_y_procesar_ilrl_uniboot(ot_numero, serie_cable, current_mode)
+        # --- FILTRO DE BYPASS (Preparado para Polaridad también) ---
+        linea_pc = self.app.config.get('linea_actual', 'JWS1-1').lower().replace("-", "_")
+        val_ilrl_activa = self.app.config.get(f'val_ilrl_{linea_pc}', True)
+        val_geo_activa = self.app.config.get(f'val_geo_{linea_pc}', True)
+        val_pol_activa = self.app.config.get(f'val_pol_{linea_pc}', True) 
+
+        # 1. IL/RL
+        if val_ilrl_activa:
+            self.last_ilrl_result = self.buscar_y_procesar_ilrl_uniboot(ot_numero, serie_cable, current_mode)
+        else:
+            self.last_ilrl_result = {'status': 'APROBADO', 'details': 'BYPASS ACTIVO: Omitido desde Dashboard.', 'raw_data': []}
         
-        # 2. Geometría (Lógica Fanout)
-        self.last_geo_result = self.buscar_y_procesar_geo_uniboot(ot_numero, serie_cable)
+        # 2. Geometría
+        if val_geo_activa:
+            self.last_geo_result = self.buscar_y_procesar_geo_uniboot(ot_numero, serie_cable)
+        else:
+            self.last_geo_result = {'status': 'APROBADO', 'details': 'BYPASS ACTIVO: Omitido desde Dashboard.', 'raw_data': []}
+
+        # 3. Polaridad (NUEVO)
+        if val_pol_activa:
+            self.last_pol_result = self.procesar_polaridad_uniboot(ot_numero, serie_cable)
+        else:
+            self.last_pol_result = {'status': 'APROBADO', 'details': 'BYPASS ACTIVO: Omitido desde Dashboard.', 'raw_data': []}
         
+        # --- Mostrar en Pantalla ---
         self.mostrar_resultado("IL/RL", self.last_ilrl_result)
         self.mostrar_resultado("Geometría", self.last_geo_result)
+        self.mostrar_resultado("Polaridad", self.last_pol_result)
 
-        # --- Semáforo Final ---
+        # --- EVALUACIÓN SUPREMA (Las 3 deben pasar) ---
         final_status = "NO ENCONTRADO"
-        if self.last_ilrl_result['status'] not in ['NO ENCONTRADO', 'ERROR'] or self.last_geo_result['status'] not in ['NO ENCONTRADO', 'ERROR']:
-            if self.last_ilrl_result['status'] == 'APROBADO' and self.last_geo_result['status'] == 'APROBADO':
+        c1 = self.last_ilrl_result['status'] not in ['NO ENCONTRADO', 'ERROR']
+        c2 = self.last_geo_result['status'] not in ['NO ENCONTRADO', 'ERROR']
+        c3 = self.last_pol_result['status'] not in ['NO ENCONTRADO', 'ERROR']
+        
+        if c1 or c2 or c3:
+            if self.last_ilrl_result['status'] == 'APROBADO' and self.last_geo_result['status'] == 'APROBADO' and self.last_pol_result['status'] == 'APROBADO':
                 final_status = 'APROBADO'
             else:
                 final_status = 'RECHAZADO'
         
-        # --- Semáforo Final ---
-        final_status = "NO ENCONTRADO"
-        if self.last_ilrl_result['status'] not in ['NO ENCONTRADO', 'ERROR'] or self.last_geo_result['status'] not in ['NO ENCONTRADO', 'ERROR']:
-            if self.last_ilrl_result['status'] == 'APROBADO' and self.last_geo_result['status'] == 'APROBADO':
-                final_status = 'APROBADO'
-            else:
-                final_status = 'RECHAZADO'
-        
-        # --- CREACIÓN DEL SELLO DIGITAL ---
-        # El Sello Digital será exactamente el Número de Serie (único e irrepetible)
         sello_digital = serie_cable
         
         self.result_text.insert(tk.END, "\n" + "-"*60 + "\n")
         self.result_text.insert(tk.END, "ESTADO FINAL: ", ("bold", "final_status_large"))
         self.result_text.insert(tk.END, f"{final_status}\n", (final_status, "final_status_large"))
-        
-        # Mostramos el sello en pantalla
         self.result_text.insert(tk.END, f"SELLO DIGITAL:  {sello_digital}\n", "header")
         self.result_text.insert(tk.END, "-"*60 + "\n")
         
@@ -4958,25 +5141,23 @@ class VerificacionUniboot_Page(ttk.Frame):
         
         self.result_text.config(state=tk.DISABLED)
         
-        # Añadimos el sello al diccionario de log
+        # --- Registro DB ---
         log_data = {
             'serial_number': serie_cable, 'ot_number': ot_numero, 'overall_status': final_status,
             'ilrl_status': self.last_ilrl_result['status'], 'ilrl_details': self.last_ilrl_result,
             'geo_status': self.last_geo_result['status'], 'geo_details': self.last_geo_result,
-            'digital_seal': sello_digital # <--- Guardamos el sello (N.S.) en la base de datos
-        }
-        self._log_verification(log_data)
-        
-        log_data = {
-            'serial_number': serie_cable, 'ot_number': ot_numero, 'overall_status': final_status,
-            'ilrl_status': self.last_ilrl_result['status'], 'ilrl_details': self.last_ilrl_result,
-            'geo_status': self.last_geo_result['status'], 'geo_details': self.last_geo_result
+            'polaridad_status': self.last_pol_result['status'], 'polaridad_details': self.last_pol_result,
+            'digital_seal': sello_digital
         }
         self._log_verification(log_data)
 
     def mostrar_resultado(self, tipo, resultado):
-        link_tag = "ilrl_link" if tipo == "IL/RL" else "geo_link"
-        file_link_tag = "ilrl_file_link" if tipo == "IL/RL" else "geo_file_link"
+        if tipo == "IL/RL":
+            link_tag, file_link_tag = "ilrl_link", "ilrl_file_link"
+        elif tipo == "Geometría":
+            link_tag, file_link_tag = "geo_link", "geo_file_link"
+        else:
+            link_tag, file_link_tag = "pol_link", "pol_file_link"
 
         self.result_text.insert(tk.END, f"Análisis {tipo}:\n", "bold")
         self.result_text.insert(tk.END, f"  Estado: ")
@@ -4991,6 +5172,140 @@ class VerificacionUniboot_Page(ttk.Frame):
             self.result_text.insert(tk.END, "\n\n")
         else:
             self.result_text.insert(tk.END, f"\n  Detalles: {details}\n\n")
+
+    def _log_verification(self, log_data):
+        try:
+            conn = sqlite3.connect(self.app.config['db_path'])
+            cursor = conn.cursor()
+            
+            # Auto-sanación por si faltan las columnas de polaridad
+            try: cursor.execute("ALTER TABLE cable_verifications ADD COLUMN polaridad_status TEXT DEFAULT 'N/A'")
+            except sqlite3.OperationalError: pass 
+            try: cursor.execute("ALTER TABLE cable_verifications ADD COLUMN polaridad_details TEXT DEFAULT '{}'")
+            except sqlite3.OperationalError: pass 
+            
+            cursor.execute("""
+                INSERT INTO cable_verifications (
+                    entry_date, serial_number, ot_number, overall_status,
+                    ilrl_status, ilrl_details, geo_status, geo_details,
+                    polaridad_status, polaridad_details, digital_seal
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                log_data['serial_number'], log_data['ot_number'], log_data['overall_status'],
+                log_data['ilrl_status'], json.dumps(log_data.get('ilrl_details', {})),
+                log_data['geo_status'], json.dumps(log_data.get('geo_details', {})),
+                log_data.get('polaridad_status', 'N/A'), json.dumps(log_data.get('polaridad_details', {})),
+                log_data.get('digital_seal', 'N/A')
+            ))
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            messagebox.showerror("Error BD", f"Error al registrar verificación Uniboot: {e}")
+    
+    def procesar_polaridad_uniboot(self, ot_objetivo, serie_objetivo):
+        base_path = self.app.config.get('ruta_base_polaridad_uniboot', '').strip()
+        if not base_path or not os.path.exists(base_path):
+            return {'status': 'NO CONFIGURADO', 'details': 'Ruta de Polaridad Uniboot no configurada en Ajustes.', 'raw_data': []}
+
+        ot_folder = os.path.join(base_path, ot_objetivo)
+        if not os.path.exists(ot_folder):
+            return {'status': 'NO ENCONTRADO', 'details': f'Carpeta de la O.T. {ot_objetivo} no encontrada.', 'raw_data': []}
+
+        # --- NUEVA BÚSQUEDA INTELIGENTE ---
+        # Extraemos la O.T. y el Consecutivo por separado
+        serie_numerica = re.sub(r'[^0-9]', '', serie_objetivo)
+        ot_parte = serie_numerica[:9]    # Ej. "260500158"
+        secuencia = serie_numerica[9:]   # Ej. "0027"
+        
+        # Por si en algún momento la máquina solo guarda 3 dígitos del consecutivo (ej. "027")
+        secuencia_corta = secuencia[-3:] 
+
+        archivos_encontrados = []
+        
+        # Búsqueda en PASS y FAIL automáticamente
+        for root, dirs, files in os.walk(ot_folder):
+            for file in files:
+                if file.lower().endswith(('.xlsx', '.csv')) and not file.startswith('~$'):
+                    file_norm = re.sub(r'[^0-9A-Za-z]', '', file).upper()
+                    
+                    # Condición dividida: Debe contener la OT y debe contener la secuencia
+                    if ot_parte in file_norm and (secuencia in file_norm or secuencia_corta in file_norm):
+                        archivos_encontrados.append(os.path.join(root, file))
+
+        if not archivos_encontrados:
+            return {'status': 'NO ENCONTRADO', 'details': f'No se halló el archivo de Polaridad para {serie_objetivo}.', 'raw_data': []}
+
+        archivo_reciente = max(archivos_encontrados, key=os.path.getmtime)
+        
+        # ... (De aquí en adelante sigue exactamente igual el "try: if archivo_reciente...")
+        
+        try:
+            if archivo_reciente.lower().endswith('.csv'):
+                df = pd.read_csv(archivo_reciente, header=None)
+            else:
+                df = pd.read_excel(archivo_reciente, sheet_name=0, header=None)
+
+            resultado_pol = "FAIL"
+            fecha_pol = "Desconocida"
+
+            for idx, row in df.iterrows():
+                if len(row) > 1:
+                    texto_celda = str(row[0]).strip().upper()
+                    if "总结果" in texto_celda or "RESULT" in texto_celda:
+                        val = str(row[1]).strip().upper()
+                        if "PASS" in val or "FAIL" in val: 
+                            resultado_pol = "PASS" if "PASS" in val else "FAIL"
+                    elif "测试时间" in texto_celda or "TIME" in texto_celda:
+                        fecha_pol = str(row[1]).strip()
+
+            if resultado_pol not in ["PASS", "FAIL"] and len(df) > 12 and len(df.columns) > 1:
+                val_b13 = str(df.iloc[12, 1]).strip().upper()
+                if "PASS" in val_b13 or "FAIL" in val_b13:
+                    resultado_pol = "PASS" if "PASS" in val_b13 else "FAIL"
+
+            status_final = "APROBADO" if resultado_pol == "PASS" else "RECHAZADO"
+            detalles = (f"Verificación de Polaridad (Uniboot)\n"
+                        f"Resultado: {resultado_pol}\n"
+                        f"Fecha de medición: {fecha_pol}\n"
+                        f"Archivo: {os.path.basename(archivo_reciente)}")
+                        
+            return {'status': status_final, 'details': detalles, 'raw_data': [{'resultado': resultado_pol}], 'file_path': archivo_reciente}
+
+        except Exception as e:
+            return {'status': 'ERROR', 'details': f'Error leyendo Polaridad: {e}', 'raw_data': []}
+
+    # ================== MÉTODOS DE VISUALIZACIÓN ==================
+    def show_details_window(self, analysis_type):
+        if analysis_type == "ilrl":
+            data = self.last_ilrl_result
+            title = "Detalles de Análisis IL/RL (Uniboot)"
+        elif analysis_type == "geo":
+            data = self.last_geo_result
+            title = "Detalles de Geometría (Uniboot)"
+        else:
+            data = getattr(self, 'last_pol_result', None)
+            title = "Detalles de Polaridad (Uniboot)"
+            
+        if not data or not data.get('raw_data'):
+            messagebox.showinfo(title, "No hay datos detallados para mostrar.")
+            return
+            
+        data['serial_number'] = self.serie_entry.get().strip()
+        DetailsWindow(self, title, data, analysis_type)
+
+    def open_file_location(self, analysis_type):
+        if analysis_type == 'ilrl': data = self.last_ilrl_result
+        elif analysis_type == 'geo': data = self.last_geo_result
+        else: data = getattr(self, 'last_pol_result', None)
+
+        if not data or not data.get('file_path'): return
+            
+        file_path = data['file_path']
+        if os.path.exists(file_path):
+            os.startfile(os.path.abspath(os.path.dirname(file_path)))
+        else:
+            messagebox.showerror("Error", f"La ruta no existe:\n{file_path}", parent=self)
 
     # ================== MÉTODOS HÍBRIDOS (LC/SC + FANOUT) ==================
 
@@ -5386,14 +5701,27 @@ class Auditoria_LC_SC_Page(ttk.Frame):
                 except Exception as db_err:
                     print(f"Aviso: No se pudo leer {db_path} - {db_err}")
 
-            # 2. CALCULAR EL LÍMITE REAL (Total esperado + Repuestos exactos por Scrap)
+            # =========================================================================
+            # 2. NUEVA LÓGICA: DETECTAR INICIO DINÁMICO (Secuencias desplazadas)
+            # =========================================================================
+            secuencias_encontradas = []
+            for serie in cables_en_bd.keys():
+                # Extraemos los últimos 4 dígitos del N.S. (ej. JMO-2605001590375 -> 375)
+                match = re.search(r'(\d{4})$', serie)
+                if match:
+                    secuencias_encontradas.append(int(match.group(1)))
+
+            # Si la BD ya tiene cables, iniciamos desde el menor. Si está vacía, por defecto en 1.
+            inicio_secuencia = min(secuencias_encontradas) if secuencias_encontradas else 1
+
+            # 3. CALCULAR EL LÍMITE REAL DESPLAZADO
             scraps_reales = sum(1 for row in cables_en_bd.values() if 'SCRAP' in row.get('overall_status', ''))
-            limite_secuencial = total + scraps_reales
+            fin_secuencia = inicio_secuencia + total + scraps_reales - 1
 
             scraps_pendientes_list = []
             
-            # 3. Evaluar SOLO desde el cable 1 hasta el límite lógico
-            for i in range(1, limite_secuencial + 1):
+            # 4. Evaluar SOLO desde el inicio real hasta el fin desplazado
+            for i in range(inicio_secuencia, fin_secuencia + 1):
                 secuencial = str(i).zfill(4)
                 cable_visual = f"{ot_completa}{secuencial}"
                 
@@ -5974,14 +6302,26 @@ class RevisarLote_LC_SC_Page(ttk.Frame):
                 except:
                     pass
 
-            # --- CALCULAR EL LÍMITE REAL (Total esperado + Repuestos exactos por Scrap) ---
-            scraps_reales = sum(1 for row in cables_en_bd.values() if 'SCRAP' in row.get('overall_status', ''))
-            limite_secuencial = total + scraps_reales
+            # =========================================================================
+            # --- NUEVA LÓGICA: DETECTAR INICIO DINÁMICO (Secuencias desplazadas) ---
+            # =========================================================================
+            secuencias_encontradas = []
+            for serie in cables_en_bd.keys():
+                match = re.search(r'(\d{4})$', serie)
+                if match:
+                    secuencias_encontradas.append(int(match.group(1)))
 
-            # 2. Iterar SOLO desde el cable 1 hasta el límite lógico
-            for i in range(1, limite_secuencial + 1):
+            inicio_secuencia = min(secuencias_encontradas) if secuencias_encontradas else 1
+
+            # CALCULAR EL LÍMITE REAL DESPLAZADO
+            scraps_reales = sum(1 for row in cables_en_bd.values() if 'SCRAP' in row.get('overall_status', ''))
+            fin_secuencia = inicio_secuencia + total + scraps_reales - 1
+
+            # Iterar desde el inicio real hasta el fin desplazado
+            for i in range(inicio_secuencia, fin_secuencia + 1):
                 secuencial = str(i).zfill(4)
                 cable_visual = f"{ot_completa}{secuencial}"
+            # =========================================================================
                 
                 row_encontrado = cables_en_bd.get(cable_visual)
 
