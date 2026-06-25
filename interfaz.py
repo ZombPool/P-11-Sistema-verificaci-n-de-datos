@@ -5483,105 +5483,250 @@ class Auditoria_LC_SC_Page(ttk.Frame):
         self.analisis_geo = AnalisisGEO()
         self.create_widgets()
 
-    def create_widgets(self):
-        container = ttk.Frame(self, style='TFrame')
-        container.pack(expand=True, fill='both')
+    def limpiar_filtros(self):
+        self.var_f_cable.set("")
+        self.var_f_ilrl.set("")
+        self.var_f_geo.set("")
+        self.var_f_pol.set("") # <- Limpia también polaridad
+        self.var_f_estado.set("")
+        self.var_f_sello.set("")
 
-        ctrl_frame = ttk.LabelFrame(container, text="Parámetros de Auditoría Automática", padding=15)
-        ctrl_frame.pack(fill='x', pady=(0, 15))
-
-        # ==========================================
-        # FILA 1: ENTRADAS DE DATOS (Filtros limpios)
-        # ==========================================
-        inputs_frame = ttk.Frame(ctrl_frame)
-        inputs_frame.pack(fill='x', pady=(0, 15))
-
-        ttk.Label(inputs_frame, text="Número de O.T.:", font=("Helvetica", 11, "bold")).pack(side='left', padx=5)
-        self.ot_var = tk.StringVar()
-        ttk.Entry(inputs_frame, textvariable=self.ot_var, width=18, font=("Helvetica", 11)).pack(side='left', padx=5)
-
-        ttk.Label(inputs_frame, text="Total Esperado:", font=("Helvetica", 11, "bold")).pack(side='left', padx=(20, 5))
-        self.total_var = tk.StringVar()
-        ttk.Entry(inputs_frame, textvariable=self.total_var, width=8, font=("Helvetica", 11)).pack(side='left', padx=5)
-
-        # ==========================================
-        # FILA 2: BOTONES DE ACCIÓN Y SWITCHES
-        # ==========================================
-        actions_frame = ttk.Frame(ctrl_frame)
-        actions_frame.pack(fill='x')
-
-        ttk.Button(actions_frame, text="▶ Ejecutar Auditoría", command=self.ejecutar_auditoria_thread, style='success.TButton').pack(side='left', padx=(5, 20))
+    def aplicar_filtros(self, *args):
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+            
+        f_cable = self.var_f_cable.get().lower()
+        f_ilrl = self.var_f_ilrl.get().lower()
+        f_geo = self.var_f_geo.get().lower()
+        f_pol = self.var_f_pol.get().lower()
+        f_estado = self.var_f_estado.get().lower()
+        f_sello = self.var_f_sello.get().lower()
         
-        self.btn_excel = ttk.Button(actions_frame, text="📊 Descargar Reporte", command=self.descargar_reporte_excel, style='info.TButton', state=tk.DISABLED)
-        self.btn_excel.pack(side='left', padx=5)
+        if hasattr(self, 'datos_completos'):
+            for row in self.datos_completos:
+                # row: (0:Cable, 1:IL/RL, 2:Geo, 3:Polaridad, 4:Estado Final, 5:Sello)
+                if (f_cable in str(row[0]).lower() and
+                    f_ilrl in str(row[1]).lower() and
+                    f_geo in str(row[2]).lower() and
+                    f_pol in str(row[3]).lower() and
+                    f_estado in str(row[4]).lower() and
+                    f_sello in str(row[5]).lower()):
+                    
+                    self.tree.insert("", "end", values=row, tags=(row[4],))
+
+    def _actualizar_ui(self, consolidado, aprobados, rechazados, faltantes, intrusos, scraps, total):
+        # --- LA MAGIA VISUAL: Mostramos u ocultamos la columna ---
+        if self.producto_var.get() == "SC/LC":
+            self.tree.configure(displaycolumns=("Cable", "IL/RL", "Geometría", "Estado Final", "Sello en BD"))
+        else:
+            self.tree.configure(displaycolumns=self.tree["columns"]) # Muestra todas (incluye Polaridad)
+            
+        self.datos_completos = consolidado
+        self.aplicar_filtros()
         
-        self.btn_exportar = ttk.Button(actions_frame, text="☁️ Subir a Feishu", command=self.exportar_feishu_thread, style='info.TButton', state=tk.DISABLED)
-        self.btn_exportar.pack(side='left', padx=5)
-
-        self.liberar_var = tk.BooleanVar(value=False)
-        self.chk_liberar = ttk.Checkbutton(actions_frame, text="✅ Aprobar Liberación Oficial", variable=self.liberar_var, bootstyle="success-round-toggle")
-        self.chk_liberar.pack(side='left', padx=(30, 5)) 
-
-        # --- Título de Resumen ---
-        self.summary_label = ttk.Label(container, text="Ingrese la O.T. y cantidad. El sistema consolidará datos de TODAS las líneas de producción.", font=("Helvetica", 12, "italic"), foreground="#555555")
-        self.summary_label.pack(anchor='w', pady=5)
-
-        # =========================================================================
-        # NUEVO: BARRA DE FILTROS POR COLUMNA (Búsqueda en Tiempo Real)
-        # ==========================================
-        filtros_frame = ttk.LabelFrame(container, text="🔍 Filtros de Búsqueda Rápida", padding=5)
-        filtros_frame.pack(fill='x', pady=(0, 10))
-
-        # Variables de memoria para cada columna (El trace_add hace que filtren mientras escribes)
-        self.var_f_cable = tk.StringVar(); self.var_f_cable.trace_add("write", self.aplicar_filtros)
-        self.var_f_ilrl = tk.StringVar(); self.var_f_ilrl.trace_add("write", self.aplicar_filtros)
-        self.var_f_geo = tk.StringVar(); self.var_f_geo.trace_add("write", self.aplicar_filtros)
-        self.var_f_estado = tk.StringVar(); self.var_f_estado.trace_add("write", self.aplicar_filtros)
-        self.var_f_sello = tk.StringVar(); self.var_f_sello.trace_add("write", self.aplicar_filtros)
-
-        # Cajas de texto alineadas horizontalmente
-        ttk.Label(filtros_frame, text="Cable:").grid(row=0, column=0, padx=(5,2), sticky='w')
-        ttk.Entry(filtros_frame, textvariable=self.var_f_cable, width=18).grid(row=0, column=1, padx=2)
-
-        ttk.Label(filtros_frame, text="IL/RL:").grid(row=0, column=2, padx=(10,2), sticky='w')
-        ttk.Entry(filtros_frame, textvariable=self.var_f_ilrl, width=12).grid(row=0, column=3, padx=2)
-
-        ttk.Label(filtros_frame, text="Geo:").grid(row=0, column=4, padx=(10,2), sticky='w')
-        ttk.Entry(filtros_frame, textvariable=self.var_f_geo, width=12).grid(row=0, column=5, padx=2)
-
-        ttk.Label(filtros_frame, text="Estado:").grid(row=0, column=6, padx=(10,2), sticky='w')
-        ttk.Entry(filtros_frame, textvariable=self.var_f_estado, width=15).grid(row=0, column=7, padx=2)
-
-        ttk.Label(filtros_frame, text="Sello BD:").grid(row=0, column=8, padx=(10,2), sticky='w')
-        ttk.Entry(filtros_frame, textvariable=self.var_f_sello, width=18).grid(row=0, column=9, padx=2)
+        resumen = f"📊 RESULTADOS  |  Meta: {total}  |  ✅ Aprobados: {aprobados}  |  ❌ Rechazados: {rechazados}  |  ⚠️ Faltantes: {faltantes}"
+        if intrusos > 0: resumen += f"  |  🚨 INTRUSOS: {intrusos}"
+        if scraps > 0: resumen += f"  |  🗑️ SCRAP: {scraps}"
         
-        # Botón para borrar todo rápido
-        ttk.Button(filtros_frame, text="✖ Limpiar", command=self.limpiar_filtros, style='secondary.TButton').grid(row=0, column=10, padx=(15,5))
-        # =========================================================================
+        estado_lote_final = "RECHAZADO"
+        if aprobados >= total and intrusos == 0:
+            estado_lote_final = "APROBADO"
+            self.summary_label.config(text=resumen + "  (¡LOTE LISTO PARA LIBERAR!)", foreground="green", font=("Helvetica", 12, "bold"))
+        elif intrusos > 0:
+            self.summary_label.config(text=resumen + "  (¡ALERTA! HAY ARCHIVOS DE OTRA O.T.)", foreground="purple", font=("Helvetica", 12, "bold"))
+        else:
+            self.summary_label.config(text=resumen, foreground="#d35400", font=("Helvetica", 12, "bold"))
+            
+        self.datos_feishu_pendientes = {} # Placeholder si usas feishu
+        self.btn_exportar.config(state=tk.NORMAL)
+        self.btn_excel.config(state=tk.NORMAL)
 
-        columns = ("Cable", "IL/RL", "Geometría", "Estado Final", "Sello en BD")
-        self.tree = ttk.Treeview(container, columns=columns, show="headings", height=15)
-        self.tree = ttk.Treeview(container, columns=columns, show="headings", height=15)
+    def mostrar_detalles_cable(self, event):
+        seleccion = self.tree.selection()
+        if not seleccion: return
+        valores = self.tree.item(seleccion[0])['values']
+        if not valores: return
+
+        cable = str(valores[0])
+        detalles = getattr(self, 'detalles_auditoria', {}).get(cable)
+        if not detalles:
+            messagebox.showinfo("Sin Detalles", f"No hay información extra para {cable}.")
+            return
+
+        top = tk.Toplevel(self)
+        top.title(f"Detalles de Auditoría - {cable}")
+        top.geometry("600x550") # <- Ventana más grande para que quepa todo
+        top.transient(self.app)
+        top.grab_set()
+
+        def cerrar_si_clic_afuera(e):
+            x, y = top.winfo_rootx(), top.winfo_rooty()
+            w, h = top.winfo_width(), top.winfo_height()
+            if not (x <= e.x_root <= x + w and y <= e.y_root <= y + h):
+                top.destroy()
+        top.bind("<Button-1>", cerrar_si_clic_afuera)
+
+        ttk.Label(top, text=f"🔍 Informe Detallado", font=("Helvetica", 14, "bold")).pack(pady=(15,5))
+        ttk.Label(top, text=cable, font=("Courier New", 12)).pack(pady=(0,15))
+        frame = ttk.Frame(top, padding=20, relief="groove", borderwidth=2)
+        frame.pack(fill="both", expand=True, padx=20, pady=5)
+
+        ttk.Label(frame, text="Sello Digital BD:", font=("Helvetica", 10, "bold")).grid(row=0, column=0, sticky="w", pady=5)
+        ttk.Label(frame, text=detalles['sello'], font=("Courier New", 10)).grid(row=0, column=1, sticky="w", pady=5)
+        ttk.Label(frame, text="Estado Final:", font=("Helvetica", 10, "bold")).grid(row=1, column=0, sticky="w", pady=5)
         
-        for col in columns:
-            self.tree.heading(col, text=col)
-            if col == "Cable": self.tree.column(col, anchor='w', width=200)
-            elif col == "Sello en BD": self.tree.column(col, anchor='center', width=180)
-            else: self.tree.column(col, anchor='center', width=120)
+        lbl_final = ttk.Label(frame, text=detalles['final'], font=("Helvetica", 10, "bold"))
+        lbl_final.grid(row=1, column=1, sticky="w", pady=5)
+        if detalles['final'] == 'APROBADO': lbl_final.config(foreground="green")
+        elif detalles['final'] == 'FALTANTE': lbl_final.config(foreground="#d35400")
+        else: lbl_final.config(foreground="red")
 
-        self.tree.tag_configure('APROBADO', foreground='green', font=("Helvetica", 10, "bold"))
-        self.tree.tag_configure('RECHAZADO', foreground='red', font=("Helvetica", 10, "bold"))
-        self.tree.tag_configure('FALTANTE', foreground='#d35400', font=("Helvetica", 10, "bold"))
-        self.tree.tag_configure('INTRUSO', foreground='purple', font=("Helvetica", 10, "bold"))
-        self.tree.tag_configure('SCRAP CONFIRMADO', foreground='gray', font=("Helvetica", 10, "bold", "overstrike"))
-        self.tree.tag_configure('SCRAP PENDIENTE', foreground='red', font=("Helvetica", 10, "bold"))
-
-        scrollbar = ttk.Scrollbar(container, orient="vertical", command=self.tree.yview)
-        self.tree.configure(yscrollcommand=scrollbar.set)
-        self.tree.pack(side='left', fill='both', expand=True)
-        scrollbar.pack(side='right', fill='y')
+        ttk.Separator(frame).grid(row=2, column=0, columnspan=2, sticky="ew", pady=10)
+        ttk.Label(frame, text="Resultados IL/RL", font=("Helvetica", 11, "bold"), foreground="#0056b3").grid(row=3, column=0, columnspan=2, sticky="w", pady=2)
+        ttk.Label(frame, text=f"Estado: {detalles['ilrl']['estado']}", font=("Helvetica", 10, "italic")).grid(row=4, column=0, columnspan=2, sticky="w")
+        ttk.Label(frame, text=detalles['ilrl']['detalle'], wraplength=450).grid(row=5, column=0, columnspan=2, sticky="w", pady=(2, 10))
         
-        self.tree.bind("<Double-1>", self.mostrar_detalles_cable)
+        ttk.Label(frame, text="Resultados Geometría", font=("Helvetica", 11, "bold"), foreground="#0056b3").grid(row=6, column=0, columnspan=2, sticky="w", pady=2)
+        ttk.Label(frame, text=f"Estado: {detalles['geo']['estado']}", font=("Helvetica", 10, "italic")).grid(row=7, column=0, columnspan=2, sticky="w")
+        ttk.Label(frame, text=detalles['geo']['detalle'], wraplength=450).grid(row=8, column=0, columnspan=2, sticky="w", pady=(2, 10))
+
+        # --- AÑADIMOS POLARIDAD SI NO ES SC/LC ---
+        if self.producto_var.get() != "SC/LC":
+            ttk.Label(frame, text="Resultados Polaridad", font=("Helvetica", 11, "bold"), foreground="#0056b3").grid(row=9, column=0, columnspan=2, sticky="w", pady=2)
+            ttk.Label(frame, text=f"Estado: {detalles['pol']['estado']}", font=("Helvetica", 10, "italic")).grid(row=10, column=0, columnspan=2, sticky="w")
+            ttk.Label(frame, text=detalles['pol']['detalle'], wraplength=450).grid(row=11, column=0, columnspan=2, sticky="w", pady=(2, 10))
+
+        ttk.Button(top, text="Cerrar", command=top.destroy, style="danger.TButton").pack(pady=15)
+
+    def _proceso_auditoria(self):
+        ot_raw = self.ot_var.get().strip().upper()
+        total_raw = self.total_var.get().strip()
+
+        if not ot_raw or not total_raw.isdigit():
+            self.app.after(0, lambda: messagebox.showwarning("Datos Inválidos", "Ingrese una O.T. y una cantidad total válida."))
+            self.app.after(0, lambda: self.summary_label.config(text="Error en los datos de entrada.", foreground="red"))
+            return
+
+        ot_num = re.sub(r'[^0-9]', '', ot_raw)
+        ot_completa = f"JMO-{ot_num}"
+        total = int(total_raw)
+        self.detalles_auditoria = {}
+
+        rutas_bds = []
+        for key in ['db_path_jws1_1', 'db_path_jws1_2', 'db_path_jws1_3', 'db_path']:
+            path = self.app.config.get(key, '')
+            if path and os.path.exists(path) and path not in rutas_bds:
+                rutas_bds.append(path)
+
+        if not rutas_bds:
+            self.app.after(0, lambda: messagebox.showerror("Error", "No hay bases de datos configuradas o accesibles en red."))
+            return
+
+        consolidado = []
+        aprobados_count, rechazados_count, faltantes_count, scraps_count = 0, 0, 0, 0
+        intrusos_encontrados = set()
+
+        try:
+            cables_en_bd = {}
+            for db_path in rutas_bds:
+                try:
+                    conn = sqlite3.connect(db_path, timeout=10)
+                    conn.row_factory = sqlite3.Row
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        SELECT * FROM cable_verifications
+                        WHERE ot_number = ? OR serial_number LIKE ?
+                        ORDER BY id ASC
+                    """, (ot_completa, f"%{ot_num}%"))
+                    
+                    for row in cursor.fetchall():
+                        sn_real = row['serial_number']
+                        numeros = re.sub(r'[^0-9]', '', sn_real)
+                        sn_normalizado = f"JMO-{numeros[:13]}" if len(numeros) >= 13 else sn_real
+                        
+                        row_dict = dict(row)
+                        if sn_normalizado not in cables_en_bd:
+                            cables_en_bd[sn_normalizado] = row_dict
+                        else:
+                            if row_dict.get('entry_date', '1900') > cables_en_bd[sn_normalizado].get('entry_date', '1900'):
+                                cables_en_bd[sn_normalizado] = row_dict
+                    conn.close()
+                except:
+                    pass
+
+            secuencias_encontradas = []
+            for serie in cables_en_bd.keys():
+                match = re.search(r'(\d{4})$', str(serie).strip())
+                if match:
+                    secuencias_encontradas.append(int(match.group(1)))
+
+            inicio_manual = self.inicio_var.get().strip()
+            if inicio_manual.isdigit():
+                inicio_secuencia = int(inicio_manual)
+            else:
+                inicio_secuencia = min(secuencias_encontradas) if secuencias_encontradas else 1
+
+            scraps_reales = sum(1 for row in cables_en_bd.values() if 'SCRAP' in row.get('overall_status', ''))
+            fin_secuencia = inicio_secuencia + total + scraps_reales - 1
+            scraps_pendientes_list = []
+            
+            for i in range(inicio_secuencia, fin_secuencia + 1):
+                secuencial = str(i).zfill(4)
+                cable_visual = f"{ot_completa}{secuencial}"
+                
+                row_encontrado = cables_en_bd.get(cable_visual)
+
+                if row_encontrado:
+                    sello_bd = row_encontrado['digital_seal'] if (row_encontrado['digital_seal'] and row_encontrado['digital_seal'] != "N/A") else row_encontrado['serial_number']
+                    estado_final = row_encontrado['overall_status']
+                    estado_ilrl = row_encontrado['ilrl_status']
+                    estado_geo = row_encontrado['geo_status']
+                    
+                    # Carga segura de la Polaridad 
+                    estado_pol = row_encontrado.get('polaridad_status', 'N/A')
+                    
+                    try: ilrl_det = json.loads(row_encontrado['ilrl_details']).get('details', 'Detalle no disponible')
+                    except: ilrl_det = 'Detalle no disponible'
+                    try: geo_det = json.loads(row_encontrado['geo_details']).get('details', 'Detalle no disponible')
+                    except: geo_det = 'Detalle no disponible'
+                    try: pol_det = json.loads(row_encontrado.get('polaridad_details', '{}')).get('details', 'Detalle no disponible')
+                    except: pol_det = 'Detalle no disponible'
+
+                    if estado_final in ['SCRAP', 'SCRAP CONFIRMADO']:
+                        sello_bd = estado_final = estado_ilrl = estado_geo = estado_pol = "SCRAP CONFIRMADO"
+                        ilrl_det = geo_det = pol_det = "Confirmado por Calidad."
+                        scraps_count += 1
+                    elif estado_final == 'SCRAP PENDIENTE':
+                        sello_bd = estado_final = "SCRAP PENDIENTE"
+                        estado_ilrl = estado_geo = estado_pol = "PENDIENTE"
+                        ilrl_det = geo_det = pol_det = "Enviado a Scrap por Producción (Falta confirmar)."
+                        scraps_count += 1
+                        scraps_pendientes_list.append(cable_visual)
+                    elif estado_final == 'APROBADO':
+                        aprobados_count += 1
+                    else:
+                        rechazados_count += 1
+                else:
+                    sello_bd = "SIN SELLO (No escaneado)"
+                    estado_final = estado_ilrl = estado_geo = estado_pol = "FALTANTE"
+                    ilrl_det = geo_det = pol_det = "Cable jamás escaneado en Verificación."
+                    faltantes_count += 1
+
+                self.detalles_auditoria[cable_visual] = {
+                    'sello': sello_bd, 
+                    'final': estado_final,
+                    'ilrl': {'estado': estado_ilrl, 'detalle': ilrl_det},
+                    'geo': {'estado': estado_geo, 'detalle': geo_det},
+                    'pol': {'estado': estado_pol, 'detalle': pol_det}
+                }
+                # La tupla ahora tiene 6 datos para alimentar la tabla correctamente
+                consolidado.append((cable_visual, estado_ilrl, estado_geo, estado_pol, estado_final, sello_bd))
+
+            self.app.after(0, self._actualizar_ui, consolidado, aprobados_count, rechazados_count, faltantes_count, 0, scraps_count, total)
+
+        except Exception as e:
+            error_trace = traceback.format_exc()
+            self.app.after(0, lambda: messagebox.showerror("Error Crítico", f"Falló la auditoría consolidada:\n{error_trace}"))
 
     def ejecutar_auditoria_thread(self):
         self.summary_label.config(text="Buscando archivos y analizando datos... Por favor espera.", foreground="#0056b3")
@@ -5702,17 +5847,21 @@ class Auditoria_LC_SC_Page(ttk.Frame):
                     print(f"Aviso: No se pudo leer {db_path} - {db_err}")
 
             # =========================================================================
-            # 2. NUEVA LÓGICA: DETECTAR INICIO DINÁMICO (Secuencias desplazadas)
+            # 2. NUEVA LÓGICA: DETECTAR INICIO DINÁMICO O MANUAL
             # =========================================================================
             secuencias_encontradas = []
             for serie in cables_en_bd.keys():
-                # Extraemos los últimos 4 dígitos del N.S. (ej. JMO-2605001590375 -> 375)
-                match = re.search(r'(\d{4})$', serie)
+                match = re.search(r'(\d{4})$', str(serie).strip())
                 if match:
                     secuencias_encontradas.append(int(match.group(1)))
 
-            # Si la BD ya tiene cables, iniciamos desde el menor. Si está vacía, por defecto en 1.
-            inicio_secuencia = min(secuencias_encontradas) if secuencias_encontradas else 1
+            inicio_manual = self.inicio_var.get().strip()
+            if inicio_manual.isdigit():
+                # Si el usuario escribe manualmente el inicio, forzamos ese valor
+                inicio_secuencia = int(inicio_manual)
+            else:
+                # Si lo deja en blanco, busca en la BD. Si está vacía, inicia en 1.
+                inicio_secuencia = min(secuencias_encontradas) if secuencias_encontradas else 1
 
             # 3. CALCULAR EL LÍMITE REAL DESPLAZADO
             scraps_reales = sum(1 for row in cables_en_bd.values() if 'SCRAP' in row.get('overall_status', ''))
@@ -6056,7 +6205,7 @@ class Auditoria_LC_SC_Page(ttk.Frame):
             ws_resumen.column_dimensions['E'].width = 50
 
             # =========================================================================
-            # HOJA 2: AUDITORIA O.T. (Desglose Detallado)
+            # HOJA 2: AUDITORIA O.T. (Desglose Detallado Dinámico)
             # =========================================================================
             ws_detalles = wb.create_sheet("Auditoria O.T.")
 
@@ -6065,7 +6214,12 @@ class Auditoria_LC_SC_Page(ttk.Frame):
             center_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
             left_align = Alignment(horizontal="left", vertical="center", wrap_text=True)
 
+            incluir_pol = self.producto_var.get() != "SC/LC"
+            
             headers = ["Cable (N.S.)", "Sello Digital (BD)", "ESTADO FINAL", "Estado IL/RL", "Detalles IL/RL", "Estado Geometría", "Detalles Geometría"]
+            if incluir_pol:
+                headers.extend(["Estado Polaridad", "Detalles Polaridad"])
+                
             ws_detalles.append(headers)
 
             for col_num, cell in enumerate(ws_detalles[1], 1):
@@ -6083,16 +6237,22 @@ class Auditoria_LC_SC_Page(ttk.Frame):
                     datos.get('geo', {}).get('estado', 'N/A'),
                     datos.get('geo', {}).get('detalle', 'N/A').replace('\n', ' | ')
                 ]
+                if incluir_pol:
+                    row.extend([
+                        datos.get('pol', {}).get('estado', 'N/A'),
+                        datos.get('pol', {}).get('detalle', 'N/A').replace('\n', ' | ')
+                    ])
                 ws_detalles.append(row)
 
-            for row in ws_detalles.iter_rows(min_row=2, max_col=7, max_row=ws_detalles.max_row):
+            max_col_format = 9 if incluir_pol else 7
+            for row in ws_detalles.iter_rows(min_row=2, max_col=max_col_format, max_row=ws_detalles.max_row):
                 for i, cell in enumerate(row):
-                    if i in [0, 1, 2, 3, 5]: 
+                    if i in [0, 1, 2, 3, 5, 7]: # Índices de columnas cortas (Estados)
                         cell.alignment = center_align
                     else: 
                         cell.alignment = left_align
 
-                    if i == 2:
+                    if i == 2: # Columna "ESTADO FINAL"
                         if cell.value == "APROBADO":
                             cell.font = Font(color="006100", bold=True)
                             cell.fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
@@ -6105,7 +6265,7 @@ class Auditoria_LC_SC_Page(ttk.Frame):
                         elif cell.value == "INTRUSO":
                             cell.font = Font(color="5C005C", bold=True)
                             cell.fill = PatternFill(start_color="E6B3E6", end_color="E6B3E6", fill_type="solid")
-                        elif cell.value == "SCRAP": # <--- AÑADE ESTO
+                        elif cell.value == "SCRAP" or "SCRAP" in str(cell.value): 
                             cell.font = Font(color="FFFFFF", bold=True)
                             cell.fill = PatternFill(start_color="808080", end_color="808080", fill_type="solid")
 
@@ -6116,10 +6276,12 @@ class Auditoria_LC_SC_Page(ttk.Frame):
             ws_detalles.column_dimensions['E'].width = 65 
             ws_detalles.column_dimensions['F'].width = 18
             ws_detalles.column_dimensions['G'].width = 65
+            if incluir_pol:
+                ws_detalles.column_dimensions['H'].width = 18
+                ws_detalles.column_dimensions['I'].width = 65
 
             ws_detalles.auto_filter.ref = ws_detalles.dimensions
 
-            # Guardar (sobrescribe en automático)
             wb.save(ruta_completa)
             os.startfile(ruta_completa)
             
@@ -6207,6 +6369,10 @@ class RevisarLote_LC_SC_Page(ttk.Frame):
         ttk.Label(inputs_frame, text="Cantidad de Lote:", font=("Helvetica", 11, "bold")).pack(side='left', padx=(20, 5))
         self.total_var = tk.StringVar()
         ttk.Entry(inputs_frame, textvariable=self.total_var, width=8, font=("Helvetica", 11)).pack(side='left', padx=5)
+
+        ttk.Label(inputs_frame, text="Inicio (Opc.):", font=("Helvetica", 11, "bold")).pack(side='left', padx=(20, 5))
+        self.inicio_var = tk.StringVar()
+        ttk.Entry(inputs_frame, textvariable=self.inicio_var, width=8, font=("Helvetica", 11)).pack(side='left', padx=5)
 
         # FILA 2: BOTONES DE ACCIÓN
         actions_frame = ttk.Frame(ctrl_frame)
@@ -6303,15 +6469,19 @@ class RevisarLote_LC_SC_Page(ttk.Frame):
                     pass
 
             # =========================================================================
-            # --- NUEVA LÓGICA: DETECTAR INICIO DINÁMICO (Secuencias desplazadas) ---
+            # --- NUEVA LÓGICA: DETECTAR INICIO DINÁMICO O MANUAL ---
             # =========================================================================
             secuencias_encontradas = []
             for serie in cables_en_bd.keys():
-                match = re.search(r'(\d{4})$', serie)
+                match = re.search(r'(\d{4})$', str(serie).strip())
                 if match:
                     secuencias_encontradas.append(int(match.group(1)))
 
-            inicio_secuencia = min(secuencias_encontradas) if secuencias_encontradas else 1
+            inicio_manual = self.inicio_var.get().strip()
+            if inicio_manual.isdigit():
+                inicio_secuencia = int(inicio_manual)
+            else:
+                inicio_secuencia = min(secuencias_encontradas) if secuencias_encontradas else 1
 
             # CALCULAR EL LÍMITE REAL DESPLAZADO
             scraps_reales = sum(1 for row in cables_en_bd.values() if 'SCRAP' in row.get('overall_status', ''))
