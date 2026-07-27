@@ -1,470 +1,356 @@
 #Sheet1 (Generador de plantillas)
-' ============================== V3.0 =========================================
-' === VARIABLES DE MEMORIA CACHÉ PARA SELLOS DIGITALES ====================
-' =========================================================================
-Private dictSellos As Object
-Private lastLoadedOrder_SCLC As String
+Sub GenerarPlantilla()
+    Dim wsPlantilla As Worksheet
+    Dim wsNueva As Worksheet
+    Dim nombreNuevaHoja As String
+    Dim nombreHoja As String
+    Dim longitudCable As Integer
+    Dim celdasCombinar As Integer
+    Dim numOrden As String
+    Dim dictConfig As Object
+    Dim i As Integer, repeticiones As Integer
+    Dim isValidFormat As Boolean
+    Dim totalPiezas As Long
+    Dim residuo As Integer
+    
+    ' Configurar diccionario con la relación longitud/celdas a combinar
+    Set dictConfig = CreateObject("Scripting.Dictionary")
+    With dictConfig
+        .Add 1, 130
+        .Add 6, 80
+        .Add 8, 70
+        .Add 10, 65
+        .Add 15, 55
+        .Add 20, 50
+        .Add 25, 40
+        .Add 27, 40
+        .Add 30, 40
+        .Add 35, 40
+        .Add 40, 35
+        .Add 45, 30
+        .Add 50, 25
+        .Add 55, 24
+        .Add 60, 24
+        .Add 65, 22
+        .Add 70, 22
+        .Add 75, 20
+        .Add 80, 18
+        .Add 85, 15
+        .Add 90, 15
+        .Add 95, 15
+        .Add 100, 12
+        .Add 110, 12
+        .Add 120, 10
+        .Add 130, 10
+        .Add 140, 9
+        .Add 150, 9
+        .Add 160, 8
+        .Add 170, 8
+        .Add 180, 8
+        .Add 190, 7
+        .Add 200, 7
+        .Add 210, 6
+        .Add 220, 5
+        .Add 230, 5
+        .Add 240, 5
+        .Add 250, 4
+    End With
+    
+    On Error GoTo ErrorHandler
+    
+    ' Configuración inicial
+    Application.ScreenUpdating = False
+    
+    ' Verificar si existe la hoja PLANTILLA
+    If Not WorksheetExists("PLANTILLA") Then
+        MsgBox "No se encontró la hoja 'PLANTILLA' en este libro", vbCritical
+        Exit Sub
+    End If
+    
+    ' Obtener número de orden de trabajo
+    numOrden = ThisWorkbook.Sheets("Generador de plantillas").Range("A4").Value
+    If Trim(numOrden) = "" Then
+        MsgBox "¡ADVERTENCIA!" & vbCrLf & vbCrLf & _
+               "Por favor ingrese el número de orden de trabajo en la celda A4." & vbCrLf & _
+               "Formato aceptado: JRMO-9dígitos o JMO-9dígitos", _
+               vbExclamation, "Falta número de orden"
+        Exit Sub
+    End If
+    
+    ' Validar formato del número de orden
+    isValidFormat = False
+    If Len(numOrden) >= 14 And Left(numOrden, 5) = "JRMO-" Then
+        If IsNumeric(Mid(numOrden, 6, 9)) Then
+            isValidFormat = True
+        End If
+    ElseIf Len(numOrden) >= 13 And Left(numOrden, 4) = "JMO-" Then
+        If IsNumeric(Mid(numOrden, 5, 9)) Then
+            isValidFormat = True
+        End If
+    End If
+    
+    If Not isValidFormat Then
+        MsgBox "¡FORMATO INCORRECTO!" & vbCrLf & vbCrLf & _
+               "El número de orden debe tener formato:" & vbCrLf & _
+               "- JMRO-9dígitos (ejemplo: JMRO-250200005)" & vbCrLf & _
+               "- JMO-9dígitos (ejemplo: JMO-250300001)", _
+               vbExclamation, "Formato inválido"
+        Exit Sub
+    End If
+    
+    ' --- VERIFICAR SI LA ORDEN YA EXISTE ---
+    If OrdenExiste(numOrden) Then
+        Dim respuesta As Integer
+        respuesta = MsgBox("¡ADVERTENCIA!" & vbCrLf & vbCrLf & _
+                  "Estás a punto de crear una plantilla con una orden de trabajo ya existente." & vbCrLf & _
+                  "Orden: " & numOrden & vbCrLf & vbCrLf & _
+                  "¿Deseas continuar?", _
+                  vbExclamation + vbYesNo, "Orden duplicada")
+        
+        If respuesta = vbNo Then
+            Exit Sub
+        End If
+    End If
+    
+    ' Obtener longitud del cable
+    If IsEmpty(ThisWorkbook.Sheets("Generador de plantillas").Range("C4").Value) Then
+        MsgBox "Por favor seleccione la longitud del cable en la celda C4", vbExclamation
+        Exit Sub
+    End If
+    longitudCable = ThisWorkbook.Sheets("Generador de plantillas").Range("C4").Value
+    
+    ' Verificar que la longitud sea válida
+    If Not dictConfig.Exists(longitudCable) Then
+        MsgBox "Longitud de cable no válida. Por favor seleccione una de las opciones disponibles.", vbExclamation
+        Exit Sub
+    End If
+    
+    ' Obtener número de celdas a combinar según la longitud
+    celdasCombinar = dictConfig(longitudCable)
+    
+    ' Obtener cantidad total de piezas a escanear
+    If IsEmpty(ThisWorkbook.Sheets("Generador de plantillas").Range("D4").Value) Then
+        MsgBox "Por favor ingrese la cantidad total de piezas a escanear en la celda D4", vbExclamation
+        Exit Sub
+    End If
+    totalPiezas = ThisWorkbook.Sheets("Generador de plantillas").Range("D4").Value
+    
+    ' Cálculo dinámico de repeticiones
+    repeticiones = Int(totalPiezas / celdasCombinar)
+    residuo = totalPiezas Mod celdasCombinar
+    If residuo > 0 Then repeticiones = repeticiones + 1
+    
+    ' Generar nombre de hoja (sin prefijo JRMO-/JMO-)
+    Dim ordenLimpio As String
+    If Left(numOrden, 5) = "JRMO-" Then
+        ordenLimpio = Mid(numOrden, 6, 9)
+    Else
+        ordenLimpio = Mid(numOrden, 5, 9)
+    End If
+    nombreHoja = "ORD-" & ordenLimpio & "-" & longitudCable & "FT"
+    nombreNuevaHoja = nombreHoja & "-" & Format(Now(), "yyyymmdd")
+    
+    ' Verificar si el nombre ya existe y hacerlo único
+    i = 1
+    While WorksheetExists(nombreNuevaHoja)
+        nombreNuevaHoja = nombreHoja & "-" & Format(Now(), "yyyymmdd") & "-" & i
+        i = i + 1
+        If i > 99 Then Exit Sub
+    Wend
+    
+    ' Copiar la plantilla
+    Set wsPlantilla = ThisWorkbook.Sheets("PLANTILLA")
+    wsPlantilla.Copy After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count)
+    Set wsNueva = ActiveSheet
+    Call CopiarEventosDeHoja(wsPlantilla, wsNueva)
+    wsNueva.Unprotect password:="1234" ' <-- NUEVO: Quitar candado para armar la hoja
+    ' Copiar los botones de la plantilla original
+    Dim btnProd As OLEObject, btnCalidad As OLEObject
+    For Each oleObj In wsPlantilla.OLEObjects
+        If TypeName(oleObj.Object) = "CommandButton" Then
+            oleObj.Copy
+            wsNueva.Paste
+            ' Posicionar los botones (ajusta estas coordenadas)
+            With wsNueva.OLEObjects(wsNueva.OLEObjects.Count)
+                .Top = 100    ' Posición vertical
+                .Left = 400   ' Posición horizontal
+                If oleObj.Name = "ConfirmacionProduccion" Then
+                    .Name = "ConfirmProd_" & nombreNuevaHoja
+                ElseIf oleObj.Name = "ConfirmacionCalidad" Then
+                    .Name = "ConfirmCal_" & nombreNuevaHoja
+                End If
+            End With
+        End If
+    Next oleObj
+    
+    ' Renombrar hoja
+    On Error Resume Next
+    wsNueva.Name = nombreNuevaHoja
+    If Err.Number <> 0 Then
+        nombreNuevaHoja = "PLANTILLA-" & Format(Now(), "yyyymmdd-hhnnss")
+        wsNueva.Name = nombreNuevaHoja
+    End If
+    On Error GoTo ErrorHandler
+    
+    ' Combinar celdas según el cálculo dinámico
+    CombinarCeldasDinamico wsNueva, celdasCombinar, repeticiones, residuo
 
-' =========================================================================
-' === ACTIVAR PERMISOS ESPECIALES PARA MACROS AL ABRIR EL ARCHIVO =========
-' =========================================================================
-Private Sub Workbook_Open()
+    ' Crear botones de impresión de peso
+    CrearBotonesImprimirPeso wsNueva, celdasCombinar, repeticiones, residuo
+    
+    ' Configuración adicional
+    With wsNueva
+        .Range("G1").Value = numOrden
+        .Range("G1").Font.Bold = True
+        .Range("C4").Value = longitudCable
+        .Range("G2").Value = "Cantidad de productos a escanear: " & totalPiezas
+        .Range("G2").Font.Bold = True
+    End With
+    
+    ' Finalización
+    ' <-- NUEVO: Poner candado bloqueando a humanos pero permitiendo a las macros
+    wsNueva.Protect password:="1234", UserInterfaceOnly:=True
+    Application.ScreenUpdating = True
+    Application.DisplayAlerts = True
+    
+    MsgBox "Plantilla generada exitosamente:" & vbCrLf & _
+           "Orden: " & numOrden & vbCrLf & _
+           "Longitud: " & longitudCable & " pies" & vbCrLf & _
+           "Total piezas: " & totalPiezas & vbCrLf & _
+           "Total de empaques: " & repeticiones & " Cajas (última: " & IIf(residuo > 0, residuo, celdasCombinar) & " productos)" & vbCrLf & _
+           "Nombre hoja: " & nombreNuevaHoja, vbInformation
+    Exit Sub
+    
+Call CrearBotonesImprimirPeso(wsNueva, celdasCombinar, repeticiones, residuo)
+    
+ErrorHandler:
+    Application.ScreenUpdating = True
+    Application.DisplayAlerts = True
+    MsgBox "Error al generar plantilla:" & vbCrLf & Err.Description, vbCritical
+    
+    Call AddToHistory("GENERAR PLANTILLA", "Se creó la hoja '" & nombreNuevaHoja & "' para la orden " & numOrden)
+End Sub
+Sub CopiarEventosDeHoja(hojaOrigen As Worksheet, hojaDestino As Worksheet)
+    ' Esta función copia los eventos de una hoja a otra
+    ' Se requiere acceso al modelo de objetos VBA
+    On Error Resume Next
+    Dim lineaInicio As Long, lineaFin As Long
+    Dim codigo As String
+    
+    With ThisWorkbook.VBProject.VBComponents(hojaOrigen.CodeName).CodeModule
+        lineaInicio = .ProcStartLine("Worksheet_Change", vbext_pk_Proc)
+        lineaFin = .ProcCountLines("Worksheet_Change", vbext_pk_Proc)
+        codigo = .Lines(lineaInicio, lineaFin)
+    End With
+    
+    With ThisWorkbook.VBProject.VBComponents(hojaDestino.CodeName).CodeModule
+        .DeleteLines .ProcStartLine("Worksheet_Change", vbext_pk_Proc), _
+                     .ProcCountLines("Worksheet_Change", vbext_pk_Proc)
+        .AddFromString codigo
+    End With
+    On Error GoTo 0
+End Sub
+' --- FUNCIÓN PARA VERIFICAR ÓRDENES EXISTENTES ---
+Function OrdenExiste(numOrden As String) As Boolean
     Dim ws As Worksheet
     For Each ws In ThisWorkbook.Worksheets
-        ' Solo aplicamos el candado inteligente a la Plantilla y a las O.T.s generadas
-        If Left(ws.Name, 3) = "ORD" Or ws.Name = "PLANTILLA" Then
-            ws.Protect password:="1234", UserInterfaceOnly:=True
-        End If
-    Next ws
-End Sub
-
-' =========================================================================
-' === EVENTO PRINCIPAL ====================================================
-' =========================================================================
-Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)
-    ' Si se seleccionan múltiples celdas, salimos
-    If Target.Cells.CountLarge > 1 Then Exit Sub
-
-    ' Hojas excluidas
-    Select Case Sh.Name
-        Case "Generador de plantillas", "PLANTILLA", "Registro de pesos por caja", "Historial"
-            Exit Sub
-    End Select
-
-    Application.EnableEvents = False
-    On Error GoTo SafeExit
-
-    ' ---------------------------------------------------------------------
-    ' CASO 1: LÍNEA DE PRODUCCIÓN (COLUMNA A)
-    ' ---------------------------------------------------------------------
-    If Not Intersect(Target, Sh.Columns("A")) Is Nothing Then
-        ' Parámetros de Columnas: B(2)=Desc, C(3)=Sello, D(4)=Fecha, E(5)=Estatus
-        Call ProcessScannedSerial(Target, 2, 3, 4, 6)
-    End If
-
-SafeExit:
-    Application.EnableEvents = True
-End Sub
-
-' =========================================================================
-' === SUBRUTINA: PRODUCCIÓN (Escaneo en A -> Cruce con Calidad) ===========
-' =========================================================================
-Private Sub ProcessScannedSerial(ByVal targetCell As Range, ByVal descCol As Long, ByVal sealCol As Long, ByVal dateCol As Long, ByVal statusCol As Long)
-    Dim ws As Worksheet: Set ws = targetCell.Worksheet
-    Dim row As Long: row = targetCell.row
-    Dim scanColLetter As String: scanColLetter = Split(targetCell.Address(True, False), "$")(0)
-
-    If targetCell.Value = "" Then
-        LimpiarCampos targetCell, descCol, sealCol, dateCol, statusCol
-        Exit Sub
-    End If
-
-    ' Validación Formato Inicial
-    ' Apuntamos el error hacia descCol (Columna B) para que el operador lo vea de inmediato
-    If UCase(Left(targetCell.Value, 3)) <> "TEV" And UCase(Left(targetCell.Value, 3)) <> "JMO" Then
-        ws.Cells(row, descCol).Value = "Formato incorrecto"
-        Exit Sub
-    End If
-
-    Dim numeroSerie As String, scannedOrder As String, sheetOrder As String
-    
-    ' Fecha de escaneo
-    If ws.Cells(row, dateCol).Value = "" Then
-        ws.Cells(row, dateCol).Value = Format(Now, "dd/mm/yy hh:mm")
-    End If
-
-    ' Validación de 13 dígitos
-    numeroSerie = ExtraerNumeros(targetCell.Value)
-    If Len(numeroSerie) <> 13 Then
-        MsgBox "El número de serie debe contener 13 dígitos numéricos.", vbExclamation, "Error de Formato"
-        LimpiarCampos targetCell, descCol, sealCol, dateCol, statusCol
-        Exit Sub
-    End If
-
-    ' Validación de O.T. contra el encabezado de la hoja (G1)
-    scannedOrder = Mid(numeroSerie, 1, 9)
-    sheetOrder = Mid(ws.Range("G1").Value, 5, 9)
-    If scannedOrder <> sheetOrder Then
-        MsgBox "ESTE NÚMERO DE SERIE NO CORRESPONDE A LA ORDEN DE TRABAJO DE ESTA HOJA", vbCritical, "Cruce de O.T."
-        LimpiarCampos targetCell, descCol, sealCol, dateCol, statusCol
-        Exit Sub
-    End If
-
-    ' --- VERIFICACIÓN DE DUPLICADOS ---
-    ' Apuntamos la alerta hacia descCol (Columna B) en lugar de statusCol
-    If VerificarDuplicados(targetCell, scanColLetter, descCol) Then
-        Exit Sub
-    End If
-
-    ' =====================================================================
-    ' === MAGIA DE TRAZABILIDAD: CRUCE CON REPORTE DE AUDITORÍA (PYTHON) ==
-    ' =====================================================================
-    
-    ' 1. Cargar el reporte de la O.T. en memoria (Solo si no está cargado ya)
-    If scannedOrder <> lastLoadedOrder_SCLC Then
-        If Not CargarReporteEmpaque(scannedOrder) Then ' <--- CAMBIO DE NOMBRE
-            LimpiarCampos targetCell, descCol, sealCol, dateCol, statusCol
-            Exit Sub
-        End If
-    End If
-    
-    ' 2. Buscar el cable en la memoria caché
-    Dim selloDigital As String
-    If dictSellos.Exists(numeroSerie) Then
-        selloDigital = dictSellos(numeroSerie)
-        
-        ' Poka-Yoke: Evitar empaque de chatarra o rechazados
-        If selloDigital = "BLOQUEADO" Then
-            MsgBox "? CABLE BLOQUEADO POR CALIDAD ?" & vbCrLf & vbCrLf & _
-                   "El N.S. " & numeroSerie & " fue clasificado como RECHAZADO o SCRAP en la Auditoría Oficial." & vbCrLf & _
-                   "Retira este cable de la línea inmediatamente.", vbCritical, "Alerta de Calidad"
-            LimpiarCampos targetCell, descCol, sealCol, dateCol, statusCol
-            Exit Sub
-        End If
-    
-     ' =====================================================================
-        ' === NUEVO POKA-YOKE: VALIDACIÓN DE SELLO DIGITAL VACÍO/INEXISTENTE ==
-        ' =====================================================================
-        If InStr(1, UCase(selloDigital), "SIN SELLO") > 0 Or _
-           InStr(1, UCase(selloDigital), "ERROR") > 0 Or _
-           InStr(1, UCase(selloDigital), "NO REGISTRADO") > 0 Or _
-           Trim(selloDigital) = "" Or UCase(selloDigital) = "N/A" Then
-
-            MsgBox "?? CABLE SIN SELLO DIGITAL ??" & vbCrLf & vbCrLf & _
-                   "El N.S. " & numeroSerie & " NO TIENE un Sello Digital válido asignado en la Base de Datos." & vbCrLf & _
-                   "Envíe este cable a Verificación Individual para ser escaneado y sellado antes de empacar.", vbCritical, "Seguridad de Trazabilidad"
-
-            LimpiarCampos targetCell, descCol, sealCol, dateCol, statusCol
-            Exit Sub
-        End If
-        ' =====================================================================
-    
-    Else
-        ' Si no existe, es porque Calidad no lo reportó ni siquiera como faltante
-        MsgBox "?? CABLE NO AUDITADO ??" & vbCrLf & vbCrLf & _
-               "El N.S. " & numeroSerie & " no existe en el reporte de liberación de esta O.T." & vbCrLf & _
-               "Contacte a Calidad.", vbExclamation, "Cable Desconocido"
-        LimpiarCampos targetCell, descCol, sealCol, dateCol, statusCol
-        Exit Sub
-    End If
-
-    ' =====================================================================
-
-    ' Si todo está perfecto, llenamos la fila
-    ws.Cells(row, descCol).Value = ObtenerDescripcionProducto(scannedOrder)
-    ws.Cells(row, sealCol).Value = selloDigital ' <--- AQUI SE PEGA EL SELLO
-    ws.Cells(row, statusCol).Value = "OK"
-    
-' =========================================================================
-    ' === POKA-YOKE 3: VALIDACIÓN DE ÚLTIMA PIEZA Y LIBERACIÓN FQC ============
-    ' =========================================================================
-    Dim totalEsperado As Long
-    Dim escaneosActuales As Long
-    Dim arrTemp() As String
-
-    ' 1. Extraer el total esperado de G2 (Ej: "Cantidad de productos a escanear: 55")
-    On Error Resume Next
-    arrTemp = Split(ws.Range("G2").Value, ": ")
-    If UBound(arrTemp) >= 1 Then totalEsperado = CLng(arrTemp(1))
-    
-    ' 2. Contar cuántos códigos válidos hay en la columna A en este momento
-    Dim lastScanRow As Long
-    lastScanRow = ws.Cells(ws.Rows.Count, "A").End(xlUp).row
-    If lastScanRow >= 3 Then
-        escaneosActuales = Application.WorksheetFunction.CountA(ws.Range("A3:A" & lastScanRow))
-    Else
-        escaneosActuales = 0
-    End If
-    On Error GoTo 0
-
-    ' 3. Si el operador está intentando escanear la ÚLTIMA pieza del total...
-    If totalEsperado > 0 And escaneosActuales = totalEsperado Then
-        Dim idFQC As String
-        idFQC = ObtenerIdLiberacionFQC(scannedOrder)
-
-        ' Si no existe el reporte oficial de Calidad o no tiene ID...
-        If idFQC = "" Then
-            MsgBox "O.T. Falta de liberación, contacte con el área de FQC para que puedan liberarle la O.T. JMO-" & scannedOrder, vbCritical, "Bloqueo de Cierre"
-            LimpiarCampos targetCell, descCol, sealCol, dateCol, statusCol
-            Exit Sub
-        Else
-            ' Si FQC ya liberó, extraemos el ID y lo pegamos en H1
-            ws.Range("H1").Value = "ID: " & idFQC
-            ws.Range("H1").Font.Bold = True
-            ws.Range("H1").Font.color = RGB(0, 102, 204)
-        End If
-    End If
-    ' =========================================================================
-    
-' =========================================================================
-    ' === POKA-YOKE 1: ALERTA DE FIN DE CAJA Y REDIRECCIÓN A BÁSCULA ==========
-    ' =========================================================================
-    Dim cajaRange As Range
-    Set cajaRange = ws.Cells(row, "E").MergeArea
-    
-    If cajaRange.row + cajaRange.Rows.Count - 1 = row Then
-        ' 1. Mostramos el mensaje
-        MsgBox "Para continuar, imprime la etiqueta de la caja en la báscula.", vbInformation, "Caja Completada"
-        
-        ' 2. Guardamos en la memoria cómo se llama la hoja actual (Ej. ORD-260400006-10FT)
-        HojaOrigenEscaneo = ws.Name
-        
-        ' 3. Teletransportamos al operador a la hoja de la báscula
-        On Error Resume Next
-        ThisWorkbook.Sheets("Registro de pesos por caja").Activate
-        On Error GoTo 0
-    End If
-
-    ' =========================================================================
-    ' === POKA-YOKE 2: ALERTA DE FIN DE LOTE (Suma de entregas parciales) =====
-    ' =========================================================================
-    Dim totalEntregado As Long
-    Dim totalEscaneado As Long
-    Dim filaH As Long
-    
-    ' 1. Sumamos todas las piezas entregadas en la columna H a partir de la fila 37
-    totalEntregado = 0
-    filaH = 37
-    Do While ws.Range("G" & filaH).Value <> ""
-        Dim valH As String
-        valH = ws.Range("H" & filaH).Value
-        valH = Replace(valH, " Pzs", "") ' Le quitamos el texto " Pzs" para poder sumar
-        If IsNumeric(valH) Then
-            totalEntregado = totalEntregado + CLng(valH)
-        End If
-        filaH = filaH + 2 ' Saltamos de 2 en 2 porque están combinadas
-    Loop
-    
-    ' 2. Evaluamos usando el lastScanRow que YA calculamos arriba en el Poka-Yoke 3
-    If lastScanRow >= 3 Then
-        totalEscaneado = Application.WorksheetFunction.CountA(ws.Range("A3:A" & lastScanRow))
-        
-        ' 3. Si la cantidad escaneada alcanza EXACTAMENTE la suma de lo entregado, lanzamos alerta
-        If totalEscaneado = totalEntregado And totalEntregado > 0 Then
-            MsgBox "Terminaste de escanear el lote de " & totalEntregado & " piezas." & vbCrLf & vbCrLf & _
-                   "Verifica que tu cantidad escaneada coincida con la cantidad entregada físicamente.", _
-                   vbExclamation, "Lote de Producción Completado"
-        End If
-    End If
-
-End Sub
-
-' =========================================================================
-' === MOTOR DE LECTURA DE REPORTE (EXTRACCIÓN DE SELLOS EMPAQUE) ==========
-' =========================================================================
-Function CargarReporteEmpaque(ot_num As String) As Boolean
-    Dim basePath As String, filePath As String
-    Dim wbReporte As Workbook, wsReporte As Worksheet
-    Dim lastRow As Long, i As Long
-    Dim nsCable As String, selloBD As String, estadoFinal As String
-    Dim fso As Object
-    
-    Set fso = CreateObject("Scripting.FileSystemObject")
-    
-    ' Instanciar el diccionario
-    If dictSellos Is Nothing Then Set dictSellos = CreateObject("Scripting.Dictionary")
-    dictSellos.RemoveAll
-
-    ' 1. Encontrar la ruta del Escritorio donde Python guardó el Excel de LOTE
-    basePath = Environ("USERPROFILE") & "\Desktop\Reportes de Lote Empaque\"
-    filePath = basePath & "Reporte_LOTE_JMO-" & ot_num & ".xlsx"
-    
-    ' Intento 2: Si tienen OneDrive activado
-    If Not fso.FileExists(filePath) Then
-        filePath = Environ("USERPROFILE") & "\OneDrive\Escritorio\Reportes de Lote Empaque\Reporte_LOTE_JMO-" & ot_num & ".xlsx"
-    End If
-    
-    ' Intento 3: En inglés
-    If Not fso.FileExists(filePath) Then
-        filePath = Environ("USERPROFILE") & "\OneDrive\Desktop\Reportes de Lote Empaque\Reporte_LOTE_JMO-" & ot_num & ".xlsx"
-    End If
-
-    If Not fso.FileExists(filePath) Then
-        MsgBox "No se encontró el Reporte de Lote para la O.T. JMO-" & ot_num & vbCrLf & vbCrLf & _
-               "Asegúrese de haber generado el reporte en la herramienta 'Revisar Lote' de FibraTrace.", vbCritical, "Falta Reporte de Empaque"
-        CargarReporteEmpaque = False
-        Exit Function
-    End If
-
-    ' 2. Abrir el archivo en modo oculto y de solo lectura
-    Application.ScreenUpdating = False
-    Application.DisplayAlerts = False
-    Set wbReporte = Workbooks.Open(filePath, ReadOnly:=True)
-    
-    ' Apuntamos a la pestaña correcta generada por la nueva herramienta
-    On Error Resume Next
-    Set wsReporte = wbReporte.Sheets("Extracción de Sellos")
-    On Error GoTo 0
-    
-    If Not wsReporte Is Nothing Then
-        lastRow = wsReporte.Cells(wsReporte.Rows.Count, "A").End(xlUp).row
-        
-        ' 3. Extraer N.S., Sellos y Estados (Empieza en Fila 2)
-        For i = 2 To lastRow
-            nsCable = ExtraerNumeros(wsReporte.Cells(i, 1).Value)
-            selloBD = wsReporte.Cells(i, 2).Value
-            estadoFinal = UCase(Trim(wsReporte.Cells(i, 3).Value))
-            
-            If Len(nsCable) = 13 Then
-                If estadoFinal = "APROBADO" Then
-                    dictSellos(nsCable) = selloBD
-                Else
-                    ' Si es RECHAZADO, INTRUSO, FALTANTE o SCRAP, lo bloqueamos
-                    dictSellos(nsCable) = "BLOQUEADO"
-                End If
+        ' Excluir la hoja "Generador de plantillas" y la hoja "PLANTILLA"
+        If ws.Name <> "Generador de plantillas" And ws.Name <> "PLANTILLA" Then
+            ' Buscar el número de orden en el nombre de la hoja
+            If InStr(ws.Name, numOrden) > 0 Then
+                OrdenExiste = True
+                Exit Function
             End If
-        Next i
-    End If
-    
-    wbReporte.Close False
-    Application.DisplayAlerts = True
-    Application.ScreenUpdating = True
-
-    lastLoadedOrder_SCLC = ot_num
-    CargarReporteEmpaque = True
-End Function
-
-
-' =========================================================================
-' === FUNCIONES AUXILIARES ================================================
-' =========================================================================
-Sub LimpiarCampos(ByVal targetCell As Range, ByVal descCol As Long, ByVal sealCol As Long, ByVal dateCol As Long, ByVal statusCol As Long)
-    Dim ws As Worksheet, row As Long
-    Set ws = targetCell.Worksheet
-    row = targetCell.row
-    
-    targetCell.ClearContents
-    ws.Cells(row, descCol).ClearContents
-    ws.Cells(row, sealCol).ClearContents
-    ws.Cells(row, dateCol).ClearContents
-    ws.Cells(row, statusCol).ClearContents
-End Sub
-
-Function VerificarDuplicados(ByVal targetCell As Range, ByVal scanColLetter As String, ByVal statusCol As Long) As Boolean
-    Dim ws As Worksheet, row As Long
-    Set ws = targetCell.Worksheet
-    row = targetCell.row
-    VerificarDuplicados = False
-
-    ' 1. Busca duplicados en la misma hoja
-    Dim lastRow As Long, i As Long
-    lastRow = ws.Cells(ws.Rows.Count, scanColLetter).End(xlUp).row
-    For i = 3 To lastRow
-        If i <> row And ws.Cells(i, scanColLetter).Value <> "" And ws.Cells(i, scanColLetter).Value = targetCell.Value Then
-            ws.Cells(row, statusCol).Value = "DUPLICADO en esta hoja, fila " & i
-            VerificarDuplicados = True
-            Exit Function
-        End If
-    Next i
-
-    ' 2. Busca duplicados en otras hojas
-    Dim wsCheck As Worksheet
-    For Each wsCheck In ThisWorkbook.Worksheets
-        If wsCheck.Name <> ws.Name And (Left(wsCheck.Name, 3) = "ORD" Or Left(wsCheck.Name, 9) = "PLANTILLA") Then
-            If Application.WorksheetFunction.CountIf(wsCheck.Columns(scanColLetter), targetCell.Value) > 0 Then
-                Dim duplicateRow As Long
-                duplicateRow = wsCheck.Columns(scanColLetter).Find(What:=targetCell.Value, LookIn:=xlValues, LookAt:=xlWhole).row
-                ws.Cells(row, statusCol).Value = "DUPLICADO en hoja '" & wsCheck.Name & "', fila " & duplicateRow
-                VerificarDuplicados = True
+            ' Opcional: Buscar también en el contenido de la celda G1
+            If ws.Range("G1").Value = numOrden Then
+                OrdenExiste = True
                 Exit Function
             End If
         End If
-    Next wsCheck
+    Next ws
+    OrdenExiste = False
 End Function
 
-Function ExtraerNumeros(ByVal cadena As String) As String
-    Dim i As Integer, caracter As String, resultado As String
-    resultado = ""
-    For i = 1 To Len(cadena)
-        caracter = Mid(cadena, i, 1)
-        If IsNumeric(caracter) Then resultado = resultado & caracter
-    Next i
-    ExtraerNumeros = resultado
-End Function
-
-Function ObtenerDescripcionProducto(ByVal orderNumber As String) As String
-    ' *** AQUI SIGUE TU LISTA EXACTA ***
-    Select Case orderNumber
-        Case "250300001": ObtenerDescripcionProducto = "Patchcord,LC UPC-LC UPC,G.657.A2,2F,10FT"
-        Case "250200005": ObtenerDescripcionProducto = "Patchcord,SC UPC-SC UPC,G.657.A2,2F,8FT"
-        Case "250900019": ObtenerDescripcionProducto = "Patchcord,lc UPC-LC UPC,G.657.A2,2F,8FT"
-        Case "250900009": ObtenerDescripcionProducto = "Patchcord,LC UPC-LC UPC,G.657.A2,2F,25FT"
-        Case "251000005": ObtenerDescripcionProducto = "Patchcord,LC UPC-LC UPC,G.657.A2,2F,30FT"
-        Case "251000007": ObtenerDescripcionProducto = "Patchcord,LC UPC-LC UPC,G.657.A2,2F,8FT"
-        Case "251000006": ObtenerDescripcionProducto = "Patchcord,LC UPC-LC UPC,G.657.A2,2F,10FT"
-        Case "251000004": ObtenerDescripcionProducto = "Patchcord,LC UPC-LC UPC,G.657.A2,2F,20FT"
-        Case "251000012": ObtenerDescripcionProducto = "Patchcord,LC UPC-LC UPC,G.657.A2,1F,10FT"
-        Case "251000013": ObtenerDescripcionProducto = "Patchcord,LC UPC-LC UPC,G.657.A2,2F,70FT"
-        Case "251000010": ObtenerDescripcionProducto = "Patchcord,LC UPC-LC UPC,G.657.A2,2F,10FT"
-        Case "251000015": ObtenerDescripcionProducto = "Patchcord,LC UPC-LC UPC,G.657.A2,2F,110FT"
-        Case "251000014": ObtenerDescripcionProducto = "Patchcord,LC UPC-LC UPC,G.657.A2,1F,8FT"
-        Case "251000016": ObtenerDescripcionProducto = "Patchcord,LC UPC-LC UPC,G.657.A2,2F,15FT"
-        Case "251000018": ObtenerDescripcionProducto = "Patchcord,LC UPC-LC UPC,G.657.A2,2F,60FT"
+' --- FUNCIÓN PARA COMBINAR CELDAS CON "CAJA X" ---
+Sub CombinarCeldasDinamico(ws As Worksheet, celdasCombinar As Integer, repeticiones As Integer, residuo As Integer)
+    Dim startRow As Integer
+    Dim i As Integer
+    Dim celdasACombinar As Integer
     
-
-    End Select
-End Function
-
-' =========================================================================
-' === FUNCIÓN: BUSCAR REPORTE OFICIAL FQC Y EXTRAER ID ====================
-' =========================================================================
-Function ObtenerIdLiberacionFQC(ot_num As String) As String
-    Dim basePath As String, filePath As String
-    Dim wbReporte As Workbook, wsReporte As Worksheet
-    Dim fso As Object
+    startRow = 3 ' Fila inicial
     
-    Set fso = CreateObject("Scripting.FileSystemObject")
-    
-    ' 1. Buscar en la carpeta donde Python guarda los Reportes de Auditoría (FQC)
-    basePath = Environ("USERPROFILE") & "\Documents\LIBERACIONES FQC\"
-    filePath = basePath & "Reporte_VERIF_JMO-" & ot_num & ".xlsx"
-    
-    ' Alternativas por si tienen OneDrive activado
-    If Not fso.FileExists(filePath) Then
-        filePath = Environ("USERPROFILE") & "\OneDrive\Documents\LIBERACIONES FQC\Reporte_VERIF_JMO-" & ot_num & ".xlsx"
-    End If
-    If Not fso.FileExists(filePath) Then
-        filePath = Environ("USERPROFILE") & "\OneDrive\Documents\LIBERACIONES FQC\Reporte_VERIF_JMO-" & ot_num & ".xlsx"
-    End If
-
-    ' Si el archivo oficial no existe, significa que FQC no ha cerrado la O.T.
-    If Not fso.FileExists(filePath) Then
-        ObtenerIdLiberacionFQC = ""
-        Exit Function
-    End If
-
-    ' 2. Abrir el archivo oficial en modo invisible
-    Application.ScreenUpdating = False
-    Application.DisplayAlerts = False
-    Set wbReporte = Workbooks.Open(filePath, ReadOnly:=True)
-    
-    ' 3. Buscar en la pestaña "Resumen O.T." (donde está el recuadro azul de Python)
-    On Error Resume Next
-    Set wsReporte = wbReporte.Sheets("Resumen O.T.")
-    On Error GoTo 0
-    
-    If Not wsReporte Is Nothing Then
-        Dim valE8 As String
-        valE8 = wsReporte.Range("E8").Value ' Celda donde Python imprime el ID
-        
-        ' Validar si contiene la nomenclatura oficial
-        If InStr(valE8, "REP-FQC-") > 0 Then
-            ' Limpiamos el texto para devolver solo el ID puro
-            ObtenerIdLiberacionFQC = Trim(Replace(valE8, "ID de Liberación:", ""))
+    For i = 1 To repeticiones
+        ' Determinar cuántas celdas combinar (última iteración usa el residuo)
+        If i = repeticiones And residuo > 0 Then
+            celdasACombinar = residuo
         Else
-            ObtenerIdLiberacionFQC = "" ' Archivo existe, pero no fue aprobado/liberado oficialmente
+            celdasACombinar = celdasCombinar
         End If
-    Else
-        ObtenerIdLiberacionFQC = ""
-    End If
-    
-    ' Cerrar archivo sin guardar
-    wbReporte.Close False
-    Application.DisplayAlerts = True
-    Application.ScreenUpdating = True
+        
+        ' --- Aplicar formato a la COLUMNA E ---
+        With ws.Range("E" & startRow & ":E" & (startRow + celdasACombinar - 1))
+            .Merge
+            .HorizontalAlignment = xlCenter
+            .VerticalAlignment = xlCenter
+            .Value = "Caja " & i
+            .BorderAround LineStyle:=xlContinuous, Weight:=xlThin
+        End With
+        
+        ' --- APLICAR EL MISMO FORMATO A LA COLUMNA N ---
+        With ws.Range("N" & startRow & ":N" & (startRow + celdasACombinar - 1))
+            .Merge
+            .HorizontalAlignment = xlCenter
+            .VerticalAlignment = xlCenter
+            .Value = "Caja " & i
+            .BorderAround LineStyle:=xlContinuous, Weight:=xlThin
+        End With
+        
+        startRow = startRow + celdasACombinar
+    Next i
+End Sub
+
+' --- FUNCIÓN PARA VERIFICAR SI UNA HOJA EXISTE ---
+Function WorksheetExists(sheetName As String) As Boolean
+    On Error Resume Next
+    WorksheetExists = (ThisWorkbook.Sheets(sheetName).Name <> "")
+    On Error GoTo 0
 End Function
 
-#Sheet2 (PLANTILLA)
+Sub CrearBotonesImprimirPeso(ws As Worksheet, celdasCombinar As Integer, repeticiones As Integer, residuo As Integer)
+    Dim startRow As Integer
+    Dim i As Integer
+    Dim btn As Button
+    Dim topPosition As Double
+    Dim leftPosition As Double
+    
+    On Error Resume Next
+    startRow = 2
+    leftPosition = ws.Range("F1").Left + 5 ' Ajuste de posición
+    
+    For i = 1 To repeticiones
+        ' Calcular posición vertical
+        topPosition = ws.Range("E" & startRow).Top + (ws.Range("E" & startRow).Height / 2) - 10
+        
+        ' Crear botón de formulario (más compatible)
+        Set btn = ws.Buttons.Add(Left:=leftPosition, _
+                                Top:=topPosition, _
+                                Width:=100, _
+                                Height:=50)
+        
+        With btn
+            .Name = "btnImprimir_" & i
+            .Caption = "Imprimir Peso"
+            .Font.Size = 15
+            .OnAction = "'ImprimirEtiquetaDesdeBarTender'"
+        End With
+        
+        startRow = startRow + celdasCombinar
+    Next i
+    On Error GoTo 0
+End Sub
+
+
+Sheet2 (PLANTILLA)
 Sub Workbook(ByVal Target As Range)
     Dim ws As Worksheet
     Set wb = ThisWorkbook
@@ -517,6 +403,7 @@ Sub Workbook(ByVal Target As Range)
 
     Application.EnableEvents = True
 End Sub
+
 
 #Sheet4 (Registro de pesos por caja)
 ' ======= Declaraciones API para puerto serial =======
@@ -1752,765 +1639,1497 @@ Function ObtenerIdLiberacionFQC(ot_num As String) As String
     Application.ScreenUpdating = True
 End Function
 
-
-
 ### A CONTINUACIÓN SE MUESTRAN LOS FORMS ###
+
 #frmAccionLote
+
 ' Variable pública para comunicar la decisión
+
 Public userConfirmed As Boolean
 
+
+
 ' Este código se ejecuta cuando se presiona "Aceptar"
+
 Private Sub btnAceptar_Click()
+
     userConfirmed = True
+
     Me.Hide
+
 End Sub
+
+
 
 ' Este código se ejecuta cuando se presiona "Cancelar"
+
 Private Sub btnCancelar_Click()
+
     userConfirmed = False
+
     Me.Hide
+
 End Sub
 
+
+
 ' Esta función pública permite a la macro principal mostrar el mensaje
+
 Public Sub ShowConfirmation(loteNum As Long, pieceCount As Long)
+
     Me.lblMensaje.Caption = "Estás a punto de cerrar el LOTE " & loteNum & " con " & pieceCount & " piezas." & vbCrLf & vbCrLf & _
+
                            "Esta acción bloqueará las celdas." & vbCrLf & _
+
                            "¿Deseas continuar?" & vbCrLf & _
+
                            "Verifica que hayas completado los siguientes pasos:" & vbCrLf & _
+
                            "1. La cantidad de piezas recibidas es correcta." & vbCrLf & _
+
                            "2. La cantidad de piezas que subiste a la plataforma coincide con la cantidad escaneada."
+
     Me.Show
+
 End Sub
+
+
 
 Private Sub lblMensaje_Click()
 
+
+
 End Sub
+
+
 
 ' Si el usuario cierra la ventana con la "X"
+
 Private Sub UserForm_QueryClose(Cancel As Integer, CloseMode As Integer)
+
     If CloseMode = vbFormControlMenu Then
+
         userConfirmed = False
+
     End If
+
 End Sub
+
+
 
 #UserForm1
+
 Private Sub UserForm_Click()
 
+
+
 End Sub
+
+
 
 #UserForm2
+
 Private Sub UserForm_Click()
 
+
+
 End Sub
+
+
 
 #UserForm3
+
 Private Sub UserForm_Click()
 
+
+
 End Sub
+
+
 
 #UserForm4
+
 Private Sub UserForm_Click()
 
+
+
 End Sub
+
+
 
 #### A CONTINUACIÓN SE MUESTRAN LOS MODULOS ###
 
+
+
 #Module1
+
 Sub ConfirmacionProduccion_Click()
+
     Dim ws As Worksheet
+
     Set ws = ActiveSheet
+
     
+
     ' Obtener datos básicos
+
     Dim ordenTrabajo As String, cantidadPiezas As String
+
     ordenTrabajo = ws.Range("G1").Value
+
     cantidadPiezas = Split(ws.Range("G2").Value, ": ")(1)
+
     
+
     ' Solicitar nombre del operador
+
     Dim nombreOperador As String
+
     nombreOperador = InputBox("Ingrese su nombre completo:", "Registro de Operador")
+
     
+
     If nombreOperador = "" Then Exit Sub
+
     
+
     ' Registrar datos
+
     Dim fechaHora As String
+
     fechaHora = Format(Now, "dd/mm/yyyy hh:mm")
+
     
+
     With ws
+
         
+
         .Unprotect password:="PRODUCCION2025" ' Contraseña temporal si está protegida
+
         .Range("G25").Value = "CONFIRMADO POR PRODUCCIÓN"
+
         .Range("G26").Value = "Operador: " & nombreOperador
+
         .Range("G27").Value = "Fecha: " & fechaHora
+
         .Range("G28").Value = "Piezas: " & cantidadPiezas
+
         .Protect password:="1234"
+
     End With
+
     
+
     ' Mostrar resumen
+
     MsgBox "REGISTRO COMPLETO:" & vbCrLf & vbCrLf & _
+
            "Orden: " & ordenTrabajo & vbCrLf & _
+
            "Operador: " & nombreOperador & vbCrLf & _
+
            "Piezas: " & cantidadPiezas & vbCrLf & _
+
            "Fecha: " & fechaHora, _
+
            vbInformation, "Producción Confirmada"
+
     Call AddToHistory("CONFIRMACIÓN DE PRODUCCIÓN", "Producción confirmó la hoja '" & nombreNuevaHoja & "' para la orden " & numOrden)
+
 End Sub
 
+
+
 #Module2
+
 Sub ConfirmacionCalidad_Click()
+
     Dim ws As Worksheet
+
     Set ws = ActiveSheet
+
     
+
     ' Verificar si producción ya confirmó
+
     If ws.Range("G25").Value <> "CONFIRMADO POR PRODUCCIÓN" Then
+
         MsgBox "Error: La producción no ha confirmado aún.", vbExclamation
+
         Exit Sub
+
     End If
+
     
+
     ' Obtener datos existentes
+
     Dim ordenTrabajo As String, cantidadPiezas As String
+
     Dim operadorProd As String, fechaProd As String
+
     
+
     ordenTrabajo = ws.Range("G1").Value
+
     cantidadPiezas = Split(ws.Range("G2").Value, ": ")(1)
+
     operadorProd = Split(ws.Range("G27").Value, ": ")(1)
+
     fechaProd = Split(ws.Range("G28").Value, ": ")(1)
+
     
+
     ' 1. Solicitar datos de calidad (Nombre)
+
     Dim inspectorCalidad As String
+
     inspectorCalidad = InputBox("Ingrese su nombre (Inspector de Calidad):", "Autenticación")
+
     If inspectorCalidad = "" Then Exit Sub
+
     
+
     ' --- NUEVO: 2. Solicitar ID del Reporte de Liberación ---
+
     Dim idReporte As String
+
     idReporte = InputBox("Ingrese el ID ÚNICO del Reporte de Calidad que libera esta O.T.:", "Trazabilidad de Lote")
+
     
+
     If idReporte = "" Then
+
         MsgBox "OPERACIÓN CANCELADA: El ID del reporte es obligatorio para liberar la O.T.", vbCritical, "Falta Información"
+
         Exit Sub
+
     End If
+
     ' ---------------------------------------------------------
+
     
+
     ' 3. Solicitar contraseña
+
     Dim password As String
+
     password = InputBox("Ingrese la contraseña de calidad:", "Verificación")
+
     
+
     If password <> "Calidad2024" Then  ' Cambiar por tu contraseña
+
         MsgBox "Contraseña incorrecta", vbCritical
+
         Exit Sub
+
     End If
+
     
+
     ' Registrar datos
+
     Dim fechaHora As String
+
     fechaHora = Format(Now, "dd/mm/yyyy hh:mm")
+
     
+
     With ws
+
         .Unprotect password:="1234"
+
         .Range("G21").Value = "VERIFICADO POR CALIDAD"
+
         .Range("G22").Value = "Inspector: " & inspectorCalidad
+
         .Range("G23").Value = "Fecha: " & fechaHora
+
         .Range("G24").Value = "ID Reporte: " & idReporte ' <--- NUEVO: Escribimos el ID en la celda solicitada
+
         .Range("H22:H23").Value = "Estatus: APROBADO"
+
         
+
         ' Bloquear hoja completamente
+
         .Protect password:="Calidad2024", _
+
                  DrawingObjects:=True, _
+
                  Contents:=True, _
+
                  Scenarios:=True, _
+
                  UserInterfaceOnly:=False
+
     End With
+
     
+
     ' Mostrar resumen
+
     MsgBox "INFORME FINAL:" & vbCrLf & vbCrLf & _
+
            "Orden: " & ordenTrabajo & vbCrLf & _
+
            "Piezas: " & cantidadPiezas & vbCrLf & _
+
            "Producción: " & operadorProd & " (" & fechaProd & ")" & vbCrLf & _
+
            "Calidad: " & inspectorCalidad & " (" & fechaHora & ")" & vbCrLf & _
+
            "ID de Liberación: " & idReporte & vbCrLf & vbCrLf & _
+
            "¡HOJA BLOQUEADA PARA EDICIÓN!", _
+
            vbInformation, "Proceso Completado"
+
            
+
     ' Nota: Cambié nombreNuevaHoja a ws.Name para evitar errores de variable no definida
+
     Call AddToHistory("CONFIRMACIÓN CALIDAD", "Calidad confirmó la hoja '" & ws.Name & "' (ID Reporte: " & idReporte & ") para la orden " & ordenTrabajo)
+
 End Sub
+
+
+
 
 
 #Module3
+
 '=== Módulo para Desbloquear ===
+
 Sub DesbloquearHoja()
+
     Dim password As String
+
     password = InputBox("Ingrese la contraseña de desbloqueo:", "Autenticación")
+
     
+
     On Error Resume Next
+
     ActiveSheet.Unprotect password:=password
+
     If Err.Number = 0 Then
+
         MsgBox "Hoja desbloqueada", vbInformation, "Éxito"
+
     Else
+
         MsgBox "Contraseña incorrecta", vbCritical, "Error"
+
     End If
+
     On Error GoTo 0
+
     Call AddToHistory("CIERRE DE LOTE", "Lote " & newLoteNum & " cerrado con " & loteCount & " piezas.")
+
 End Sub
+
+
+
 
 
 #Module4
+
 ' =========================================================================
+
 ' === CONFIGURACIÓN GLOBAL ================================================
+
 ' =========================================================================
+
 ' Define la fila donde comienza la tabla de registro de lotes.
+
 Private Const LOG_START_ROW As Long = 56
+
 ' Contraseña para proteger/desproteger la hoja. Cámbiala si lo deseas.
+
 Private Const SHEET_PASSWORD As String = "PRODUCCION2025"
 
+
+
 ' =========================================================================
+
 ' === MACRO PRINCIPAL "Cerrar y Contar Lote" ==============================
+
 ' =========================================================================
+
 Sub CerrarLote()
+
     Dim ws As Worksheet
+
     Set ws = ActiveSheet
+
     
+
     ' --- 1. ENCONTRAR Y CONTAR NUEVAS PIEZAS ---
+
     Dim lastRow As Long, startRow As Long, loteCount As Long
+
     lastRow = ws.Cells(ws.Rows.Count, "A").End(xlUp).row
+
     startRow = FindLastColoredRow(ws, "A") + 1 ' La fila de inicio es la siguiente a la última coloreada en Col A
+
     
+
     If lastRow < startRow Then
+
         MsgBox "No hay nuevos productos escaneados para cerrar el lote.", vbInformation
+
         Exit Sub
+
     End If
+
     
+
     loteCount = Application.WorksheetFunction.CountA(ws.Range("A" & startRow & ":A" & lastRow))
+
     
+
     ' --- 2. MOSTRAR DIÁLOGO DE CONFIRMACIÓN ---
+
     Dim logNextRow As Long, newLoteNum As Long
+
     logNextRow = ws.Cells(ws.Rows.Count, "G").End(xlUp).row + 1
+
     If logNextRow < LOG_START_ROW Then logNextRow = LOG_START_ROW
+
     newLoteNum = logNextRow - LOG_START_ROW + 1
+
     
+
     Dim frm As New frmAccionLote
+
     frm.ShowConfirmation newLoteNum, loteCount
+
     
+
     If Not frm.userConfirmed Then Exit Sub
+
     
+
     Application.ScreenUpdating = False
+
     
+
     ' --- 3. PROCESAR Y BLOQUEAR EL LOTE ---
+
     ws.Unprotect password:=SHEET_PASSWORD
+
     
+
     Dim colorLote As Long
+
     Dim colores(0 To 2) As Long
+
     colores(0) = RGB(227, 242, 253)
+
     colores(1) = RGB(232, 245, 233)
+
     colores(2) = RGB(255, 249, 231)
+
     colorLote = colores((newLoteNum - 1) Mod 3)
+
     
+
     ws.Rows(logNextRow).RowHeight = 225
+
     With ws.Cells(logNextRow, "G")
+
         .Value = "LOTE " & newLoteNum & ": " & loteCount & " Piezas (Cerrado el " & Format(Now, "dd/mm/yy hh:mm") & ")"
+
         .HorizontalAlignment = xlLeft
+
         .VerticalAlignment = xlCenter
+
         .Font.Bold = True
+
         .Font.Size = 60
+
         .WrapText = True
+
         .BorderAround LineStyle:=xlContinuous, Weight:=xlThin
+
         .Interior.color = colorLote
+
     End With
+
     With ws.Cells(logNextRow, "H")
+
         .Font.Name = "IDAutomationHC39M Free Version"
+
         .Font.Size = 60
+
         .Value = "*" & loteCount & "*"
+
         .HorizontalAlignment = xlCenter
+
         .VerticalAlignment = xlCenter
+
         .BorderAround LineStyle:=xlContinuous, Weight:=xlThin
+
         .Interior.color = colorLote
+
     End With
+
     
+
     With ws.Range("A" & startRow & ":D" & lastRow)
+
         .Interior.color = colorLote
+
         .Locked = True
+
     End With
+
     
+
     ws.Protect password:=SHEET_PASSWORD, UserInterfaceOnly:=True
+
     
+
     Application.ScreenUpdating = True
+
     
+
     MsgBox "Lote " & newLoteNum & " cerrado y bloqueado con " & loteCount & " piezas.", vbInformation
+
     MsgBox "Por favor, envía inmediatamente el lote al área de empaque.", vbInformation, "Siguiente Paso"
+
     Call AddToHistory("CIERRE DE LOTE", "Lote " & newLoteNum & " cerrado con " & loteCount & " piezas.")
+
 End Sub
 
+
+
 ' =========================================================================
+
 ' === MACRO "Confirmar Lote Empaque" ======================================
+
 ' =========================================================================
+
 Sub ConfirmarLoteEmpaque()
+
     Dim ws As Worksheet
+
     Set ws = ActiveSheet
+
     
+
     Application.ScreenUpdating = False
+
     
+
     Dim prodLastRow As Long, prodStartRow As Long, loteColor As Long, lastLogEntryRow As Long
+
     lastLogEntryRow = ws.Cells(ws.Rows.Count, "G").End(xlUp).row
+
     If lastLogEntryRow < LOG_START_ROW Then
+
         MsgBox "No se ha cerrado ningún lote de Producción para verificar.", vbExclamation
+
         Exit Sub
+
     End If
+
     loteColor = ws.Cells(lastLogEntryRow, "G").Interior.color
+
     prodLastRow = FindLastColoredRowByColor(ws, loteColor)
+
     prodStartRow = FindFirstColoredRowByColor(ws, loteColor, prodLastRow)
+
     
+
     If prodStartRow = 0 Or prodLastRow = 0 Or prodStartRow > prodLastRow Then
+
         MsgBox "Error: No se pudo encontrar el bloque de productos coloreados en la columna A.", vbCritical
+
         Exit Sub
+
     End If
+
     
+
     Dim prodRng As Range
+
     Set prodRng = ws.Range("A" & prodStartRow & ":A" & prodLastRow)
+
     
+
     Dim empaqueLastRow As Long, empaqueStartRow As Long
+
     empaqueStartRow = FindLastColoredRow(ws, "J") + 1
+
     empaqueLastRow = ws.Cells(ws.Rows.Count, "J").End(xlUp).row
+
     
+
     If empaqueLastRow < empaqueStartRow Then
+
         MsgBox "No se han escaneado nuevos productos en el área de Empaque para verificar.", vbExclamation
+
         Application.ScreenUpdating = True
+
         Exit Sub
+
     End If
+
     
+
     Dim empaqueRng As Range
+
     Set empaqueRng = ws.Range("J" & empaqueStartRow & ":J" & empaqueLastRow)
+
     empaqueRng.Interior.ColorIndex = xlNone
+
     
+
     Dim dictProd As Object, dictEmpaque As Object, cell As Range
+
     Set dictProd = CreateObject("Scripting.Dictionary")
+
     Set dictEmpaque = CreateObject("Scripting.Dictionary")
+
     
+
     For Each cell In prodRng
+
         If cell.Value <> "" And Not dictProd.Exists(cell.Value) Then dictProd.Add cell.Value, cell.row
+
     Next cell
+
     
+
     Dim duplicadosEmpaque As String
+
     duplicadosEmpaque = ""
+
     For Each cell In empaqueRng
+
         If cell.Value <> "" Then
+
             If dictEmpaque.Exists(cell.Value) Then
+
                 duplicadosEmpaque = duplicadosEmpaque & cell.Value & vbCrLf
+
                 cell.Interior.color = RGB(255, 255, 0)
+
             Else
+
                 dictEmpaque.Add cell.Value, cell.row
+
             End If
+
         End If
+
     Next cell
+
     
+
     Dim faltantesEnEmpaque As String, sobrantesEnEmpaque As String, key As Variant
+
     faltantesEnEmpaque = "": sobrantesEnEmpaque = ""
+
     
+
     For Each key In dictProd.Keys
+
         If Not dictEmpaque.Exists(key) Then faltantesEnEmpaque = faltantesEnEmpaque & key & vbCrLf
+
     Next key
+
     
+
     For Each key In dictEmpaque.Keys
+
         If Not dictProd.Exists(key) Then
+
             sobrantesEnEmpaque = sobrantesEnEmpaque & key & vbCrLf
+
             ws.Cells(dictEmpaque(key), "J").Interior.color = RGB(255, 199, 206)
+
         End If
+
     Next key
+
     
+
     If faltantesEnEmpaque = "" And sobrantesEnEmpaque = "" And duplicadosEmpaque = "" Then
+
         empaqueRng.Resize(, 4).Interior.color = loteColor
+
         MsgBox "? Verificación Exitosa" & vbCrLf & vbCrLf & _
+
                "El lote de Empaque coincide perfectamente con el de Producción." & vbCrLf & _
+
                "Total de piezas verificadas: " & dictProd.Count, vbInformation, "Verificación Completa"
+
         Call AddToHistory("VERIFICACIÓN EMPAQUE", "Éxito. Lote verificado con " & dictProd.Count & " piezas.")
+
     Else
+
         Dim errorMsg As String
+
         errorMsg = "?? Verificación Fallida. Se encontraron las siguientes discrepancias:" & vbCrLf & vbCrLf
+
         If faltantesEnEmpaque <> "" Then errorMsg = errorMsg & "--- FALTANTES EN EMPAQUE ---" & vbCrLf & faltantesEnEmpaque & vbCrLf
+
         If sobrantesEnEmpaque <> "" Then errorMsg = errorMsg & "--- SOBRANTES/INCORRECTOS EN EMPAQUE (resaltados en rojo) ---" & vbCrLf & sobrantesEnEmpaque & vbCrLf
+
         If duplicadosEmpaque <> "" Then errorMsg = errorMsg & "--- DUPLICADOS EN EMPAQUE (resaltados en amarillo) ---" & vbCrLf & duplicadosEmpaque
+
         MsgBox errorMsg, vbCritical, "Error en Verificación"
+
         Call AddToHistory("VERIFICACIÓN EMPAQUE", "Fallo. Se encontraron discrepancias.")
+
     End If
+
     
+
     Application.ScreenUpdating = True
+
 End Sub
 
+
+
 ' =========================================================================
+
 ' === MACRO "Desbloquear Lote" ============================================
+
 ' =========================================================================
+
 Sub DesbloquearLote()
+
     Dim ws As Worksheet
+
     Set ws = ActiveSheet
+
     
+
     Dim password As String
+
     password = InputBox("Ingresa la contraseña para desbloquear el lote:", "Acceso Protegido")
+
     If password <> SHEET_PASSWORD Then
+
         MsgBox "Contraseña incorrecta. Operación cancelada.", vbCritical
+
         Exit Sub
+
     End If
+
     
+
     Dim loteNumStr As String, loteNumToUnlock As Long, logLastRow As Long
+
     logLastRow = ws.Cells(ws.Rows.Count, "G").End(xlUp).row
+
     
+
     If logLastRow < LOG_START_ROW Then
+
         MsgBox "No hay lotes registrados para desbloquear.", vbInformation
+
         Exit Sub
+
     End If
+
     
+
     loteNumStr = InputBox("Ingresa el NÚMERO del lote que deseas desbloquear (ej. 3):", "Desbloquear Lote")
+
     
+
     If loteNumStr = "" Then Exit Sub
+
     If Not IsNumeric(loteNumStr) Then
+
         MsgBox "Por favor, ingresa solo un número.", vbExclamation
+
         Exit Sub
+
     End If
+
     loteNumToUnlock = CLng(loteNumStr)
+
     
+
     Dim logRow As Long, i As Long, found As Boolean
+
     found = False
+
     For i = LOG_START_ROW To logLastRow
+
         Dim currentLoteText As String, currentLoteNum As Long
+
         currentLoteText = ws.Cells(i, "G").Value
+
         If Left(currentLoteText, 4) = "LOTE" Then
+
             currentLoteNum = CLng(Trim(Split(Split(currentLoteText, ":")(0), "LOTE")(1)))
+
             If currentLoteNum = loteNumToUnlock Then
+
                 logRow = i
+
                 found = True
+
                 Exit For
+
             End If
+
         End If
+
     Next i
+
     
+
     If Not found Then
+
         MsgBox "El lote #" & loteNumToUnlock & " no fue encontrado en el registro.", vbExclamation
+
         Exit Sub
+
     End If
+
     
+
     Dim loteColor As Long, prodStartRow As Long, prodLastRow As Long
+
     loteColor = ws.Cells(logRow, "G").Interior.color
+
     prodLastRow = FindLastColoredRowByColor(ws, loteColor)
+
     prodStartRow = FindFirstColoredRowByColor(ws, loteColor, prodLastRow)
+
     
+
     If prodStartRow = 0 Or prodLastRow = 0 Then
+
         MsgBox "No se pudo encontrar el rango de celdas para el Lote " & loteNumToUnlock & ".", vbCritical
+
         Exit Sub
+
     End If
+
     
+
     Application.ScreenUpdating = False
+
     
+
     ws.Unprotect password:=SHEET_PASSWORD
+
     ws.Range("A" & prodStartRow & ":D" & prodLastRow).Locked = False
+
     ws.Protect password:=SHEET_PASSWORD, UserInterfaceOnly:=True
+
     
+
     Application.ScreenUpdating = True
+
     MsgBox "Lote " & loteNumToUnlock & " ha sido desbloqueado y ahora es editable.", vbInformation
+
     Call AddToHistory("DESBLOQUEO DE LOTE", "Lote " & loteNumToUnlock & " fue desbloqueado.")
+
 End Sub
 
+
+
 ' =========================================================================
+
 ' === MACRO "Eliminar Lote" ===============================================
-' =========================================================================
-Sub EliminarLote()
-    Dim ws As Worksheet
-    Set ws = ActiveSheet
-    
-    Dim password As String
-    password = InputBox("Esta acción es irreversible." & vbCrLf & "Ingresa la contraseña para continuar:", "Acceso Protegido")
-    If password <> SHEET_PASSWORD Then
-        MsgBox "Contraseña incorrecta. Operación cancelada.", vbCritical
-        Exit Sub
-    End If
-    
-    Dim loteNumStr As String, loteNumToDelete As Long, logLastRow As Long
-    logLastRow = ws.Cells(ws.Rows.Count, "G").End(xlUp).row
-    
-    If logLastRow < LOG_START_ROW Then
-        MsgBox "No hay lotes registrados para eliminar.", vbInformation
-        Exit Sub
-    End If
-    
-    loteNumStr = InputBox("Ingresa el NÚMERO del lote que deseas eliminar (ej. 3):", "Seleccionar Lote a Eliminar")
-    
-    If loteNumStr = "" Then Exit Sub
-    If Not IsNumeric(loteNumStr) Then
-        MsgBox "Por favor, ingresa solo un número.", vbExclamation
-        Exit Sub
-    End If
-    loteNumToDelete = CLng(loteNumStr)
-    
-    Dim logRowToDelete As Long, i As Long, found As Boolean
-    found = False
-    For i = LOG_START_ROW To logLastRow
-        Dim currentLoteText As String, currentLoteNum As Long
-        currentLoteText = ws.Cells(i, "G").Value
-        If Left(currentLoteText, 4) = "LOTE" Then
-            currentLoteNum = CLng(Trim(Split(Split(currentLoteText, ":")(0), "LOTE")(1)))
-            If currentLoteNum = loteNumToDelete Then
-                logRowToDelete = i
-                found = True
-                Exit For
-            End If
-        End If
-    Next i
-    
-    If Not found Then
-        MsgBox "El lote #" & loteNumToDelete & " no fue encontrado en el registro.", vbExclamation
-        Exit Sub
-    End If
-    
-    If MsgBox("¿Estás seguro de que deseas eliminar permanentemente el Lote " & loteNumToDelete & "?" & vbCrLf & vbCrLf & _
-              "Esta acción no se puede deshacer.", vbYesNo + vbQuestion + vbDefaultButton2, "Confirmar Eliminación") = vbNo Then
-        Exit Sub
-    End If
-    
-    Application.ScreenUpdating = False
-    
-    ws.Unprotect password:=SHEET_PASSWORD
-    
-    Dim loteColor As Long, prodStartRow As Long, prodLastRow As Long
-    loteColor = ws.Cells(logRowToDelete, "G").Interior.color
-    prodLastRow = FindLastColoredRowByColor(ws, loteColor)
-    prodStartRow = FindFirstColoredRowByColor(ws, loteColor, prodLastRow)
-    
-    If prodStartRow > 0 And prodLastRow > 0 Then
-        With ws.Range("A" & prodStartRow & ":D" & prodLastRow)
-            .ClearContents
-            .Interior.ColorIndex = xlNone
-        End With
-    End If
-    
-    ws.Range("G" & logRowToDelete & ":H" & logRowToDelete).EntireRow.Delete
-    
-    logLastRow = ws.Cells(ws.Rows.Count, "G").End(xlUp).row
-    If logLastRow >= LOG_START_ROW Then
-        For i = LOG_START_ROW To logLastRow
-            Dim newLoteNum As Long
-            newLoteNum = i - LOG_START_ROW + 1
-            Dim cellText As String, restOfText As String
-            cellText = ws.Cells(i, "G").Value
-            restOfText = Mid(cellText, InStr(cellText, ":"))
-            ws.Cells(i, "G").Value = "LOTE " & newLoteNum & restOfText
-        Next i
-    End If
-    
-    ws.Protect password:=SHEET_PASSWORD, UserInterfaceOnly:=True
-    
-    Application.ScreenUpdating = True
-    MsgBox "Lote " & loteNumToDelete & " ha sido eliminado exitosamente.", vbInformation
-    Call AddToHistory("ELIMINACIÓN DE LOTE", "Lote " & loteNumToDelete & " fue eliminado.")
-End Sub
 
 ' =========================================================================
-' === MACROS DE HISTORIAL =================================================
-' =========================================================================
-Sub AddToHistory(actionDescription As String, details As String)
-    Dim wsHistorial As Worksheet, nextRow As Long
-    On Error Resume Next
-    Set wsHistorial = ThisWorkbook.Sheets("Historial")
-    On Error GoTo 0
-    If wsHistorial Is Nothing Then Exit Sub
+
+Sub EliminarLote()
+
+    Dim ws As Worksheet
+
+    Set ws = ActiveSheet
+
     
-    nextRow = wsHistorial.Cells(wsHistorial.Rows.Count, "A").End(xlUp).row + 1
+
+    Dim password As String
+
+    password = InputBox("Esta acción es irreversible." & vbCrLf & "Ingresa la contraseña para continuar:", "Acceso Protegido")
+
+    If password <> SHEET_PASSWORD Then
+
+        MsgBox "Contraseña incorrecta. Operación cancelada.", vbCritical
+
+        Exit Sub
+
+    End If
+
     
-    With wsHistorial
-        .Cells(nextRow, 1).Value = Now()
-        .Cells(nextRow, 2).Value = actionDescription
-        .Cells(nextRow, 3).Value = details
-        .Cells(nextRow, 4).Value = Application.UserName
-        .Cells(nextRow, 5).Value = ActiveSheet.Name
-    End With
+
+    Dim loteNumStr As String, loteNumToDelete As Long, logLastRow As Long
+
+    logLastRow = ws.Cells(ws.Rows.Count, "G").End(xlUp).row
+
+    
+
+    If logLastRow < LOG_START_ROW Then
+
+        MsgBox "No hay lotes registrados para eliminar.", vbInformation
+
+        Exit Sub
+
+    End If
+
+    
+
+    loteNumStr = InputBox("Ingresa el NÚMERO del lote que deseas eliminar (ej. 3):", "Seleccionar Lote a Eliminar")
+
+    
+
+    If loteNumStr = "" Then Exit Sub
+
+    If Not IsNumeric(loteNumStr) Then
+
+        MsgBox "Por favor, ingresa solo un número.", vbExclamation
+
+        Exit Sub
+
+    End If
+
+    loteNumToDelete = CLng(loteNumStr)
+
+    
+
+    Dim logRowToDelete As Long, i As Long, found As Boolean
+
+    found = False
+
+    For i = LOG_START_ROW To logLastRow
+
+        Dim currentLoteText As String, currentLoteNum As Long
+
+        currentLoteText = ws.Cells(i, "G").Value
+
+        If Left(currentLoteText, 4) = "LOTE" Then
+
+            currentLoteNum = CLng(Trim(Split(Split(currentLoteText, ":")(0), "LOTE")(1)))
+
+            If currentLoteNum = loteNumToDelete Then
+
+                logRowToDelete = i
+
+                found = True
+
+                Exit For
+
+            End If
+
+        End If
+
+    Next i
+
+    
+
+    If Not found Then
+
+        MsgBox "El lote #" & loteNumToDelete & " no fue encontrado en el registro.", vbExclamation
+
+        Exit Sub
+
+    End If
+
+    
+
+    If MsgBox("¿Estás seguro de que deseas eliminar permanentemente el Lote " & loteNumToDelete & "?" & vbCrLf & vbCrLf & _
+
+              "Esta acción no se puede deshacer.", vbYesNo + vbQuestion + vbDefaultButton2, "Confirmar Eliminación") = vbNo Then
+
+        Exit Sub
+
+    End If
+
+    
+
+    Application.ScreenUpdating = False
+
+    
+
+    ws.Unprotect password:=SHEET_PASSWORD
+
+    
+
+    Dim loteColor As Long, prodStartRow As Long, prodLastRow As Long
+
+    loteColor = ws.Cells(logRowToDelete, "G").Interior.color
+
+    prodLastRow = FindLastColoredRowByColor(ws, loteColor)
+
+    prodStartRow = FindFirstColoredRowByColor(ws, loteColor, prodLastRow)
+
+    
+
+    If prodStartRow > 0 And prodLastRow > 0 Then
+
+        With ws.Range("A" & prodStartRow & ":D" & prodLastRow)
+
+            .ClearContents
+
+            .Interior.ColorIndex = xlNone
+
+        End With
+
+    End If
+
+    
+
+    ws.Range("G" & logRowToDelete & ":H" & logRowToDelete).EntireRow.Delete
+
+    
+
+    logLastRow = ws.Cells(ws.Rows.Count, "G").End(xlUp).row
+
+    If logLastRow >= LOG_START_ROW Then
+
+        For i = LOG_START_ROW To logLastRow
+
+            Dim newLoteNum As Long
+
+            newLoteNum = i - LOG_START_ROW + 1
+
+            Dim cellText As String, restOfText As String
+
+            cellText = ws.Cells(i, "G").Value
+
+            restOfText = Mid(cellText, InStr(cellText, ":"))
+
+            ws.Cells(i, "G").Value = "LOTE " & newLoteNum & restOfText
+
+        Next i
+
+    End If
+
+    
+
+    ws.Protect password:=SHEET_PASSWORD, UserInterfaceOnly:=True
+
+    
+
+    Application.ScreenUpdating = True
+
+    MsgBox "Lote " & loteNumToDelete & " ha sido eliminado exitosamente.", vbInformation
+
+    Call AddToHistory("ELIMINACIÓN DE LOTE", "Lote " & loteNumToDelete & " fue eliminado.")
+
 End Sub
+
+
+
+' =========================================================================
+
+' === MACROS DE HISTORIAL =================================================
+
+' =========================================================================
+
+Sub AddToHistory(actionDescription As String, details As String)
+
+    Dim wsHistorial As Worksheet, nextRow As Long
+
+    On Error Resume Next
+
+    Set wsHistorial = ThisWorkbook.Sheets("Historial")
+
+    On Error GoTo 0
+
+    If wsHistorial Is Nothing Then Exit Sub
+
+    
+
+    nextRow = wsHistorial.Cells(wsHistorial.Rows.Count, "A").End(xlUp).row + 1
+
+    
+
+    With wsHistorial
+
+        .Cells(nextRow, 1).Value = Now()
+
+        .Cells(nextRow, 2).Value = actionDescription
+
+        .Cells(nextRow, 3).Value = details
+
+        .Cells(nextRow, 4).Value = Application.UserName
+
+        .Cells(nextRow, 5).Value = ActiveSheet.Name
+
+    End With
+
+End Sub
+
+
 
 Sub MostrarHistorial()
+
     Dim password As String
+
     password = InputBox("Ingresa la contraseña para ver el historial:", "Acceso de Administrador")
+
     
+
     If password = SHEET_PASSWORD Then
+
         On Error Resume Next
+
         ThisWorkbook.Sheets("Historial").Visible = xlSheetVisible
+
         If Err.Number <> 0 Then MsgBox "La hoja 'Historial' no existe.", vbCritical
+
         On Error GoTo 0
+
     Else
+
         MsgBox "Contraseña incorrecta.", vbExclamation
+
     End If
+
 End Sub
+
+
 
 Sub OcultarHistorial()
+
     On Error Resume Next
+
     ThisWorkbook.Sheets("Historial").Visible = xlSheetVeryHidden
+
     On Error GoTo 0
+
 End Sub
 
+
+
 ' =========================================================================
+
 ' === FUNCIONES AUXILIARES DE BÚSQUEDA ====================================
+
 ' =========================================================================
+
 Private Function FindLastColoredRow(ws As Worksheet, colLetter As String) As Long
+
     Dim lastRow As Long, i As Long
+
     lastRow = ws.Cells(ws.Rows.Count, colLetter).End(xlUp).row
+
     If lastRow < 3 Then
+
         FindLastColoredRow = 2: Exit Function
+
     End If
+
     For i = lastRow To 3 Step -1
+
         If ws.Cells(i, colLetter).Interior.ColorIndex <> xlNone Then
+
             FindLastColoredRow = i
+
             Exit Function
+
         End If
+
     Next i
+
     FindLastColoredRow = 2
+
 End Function
+
+
 
 Private Function FindLastColoredRowByColor(ws As Worksheet, color As Long) As Long
+
     Dim lastRow As Long, i As Long
+
     lastRow = ws.Cells(ws.Rows.Count, "A").End(xlUp).row
+
     For i = lastRow To 3 Step -1
+
         If ws.Cells(i, "A").Interior.color = color Then
+
             FindLastColoredRowByColor = i
+
             Exit Function
+
         End If
+
     Next i
+
     FindLastColoredRowByColor = 0
+
 End Function
 
+
+
 Private Function FindFirstColoredRowByColor(ws As Worksheet, color As Long, ByVal startSearchRow As Long) As Long
+
     Dim i As Long
+
     For i = startSearchRow To 3 Step -1
+
         If ws.Cells(i, "A").Interior.color <> color Then
+
             FindFirstColoredRowByColor = i + 1
+
             Exit Function
+
         End If
+
     Next i
+
     FindFirstColoredRowByColor = 3
+
 End Function
+
+
+
 
 
 #Module5
+
 Sub ImprimirEtiquetaDesdeBarTender()
+
     Dim btApp As Object
+
     Dim btFormat As Object
+
     Dim rutaEtiqueta As String
 
+
+
     ' Ruta al archivo de etiqueta (.btw)
+
     rutaEtiqueta = "C:\Users\Paulo\Documents\DOCUMENTS EPCOMM\Proyectos de automatización\P-1. Registros de productos\ETIQUETATEST.btw"
 
+
+
     ' Iniciar BarTender
+
     Set btApp = CreateObject("BarTender.Application")
+
     btApp.Visible = True
 
+
+
     ' Abrir la etiqueta
+
     Set btFormat = btApp.Formats.Open(rutaEtiqueta, False, "")
 
+
+
     Set btFormat = Nothing
+
     Set btApp = Nothing
 
+
+
     MsgBox "Etiqueta impresa correctamente"
+
     Exit Sub
+
+
 
 End Sub
 
-#Module6
-Sub EntregarLote_Click()
-    Dim ws As Worksheet
-    Set ws = ActiveSheet
-    
-    ' 1. Solicitar el nombre del operador
-    Dim nombreOperador As String
-    nombreOperador = InputBox("Ingrese su nombre (Operador):", "Entrega de Lote a Empaque")
-    
-    ' Si el usuario cancela o deja en blanco, abortamos
-    If Trim(nombreOperador) = "" Then Exit Sub
-    
-    ' 2. Solicitar la cantidad de piezas
-    Dim cantidadPiezas As String
-    cantidadPiezas = InputBox("Ingrese la cantidad de piezas a entregar al área de Empaque:", "Cantidad de Piezas")
-    
-    If Trim(cantidadPiezas) = "" Then Exit Sub
-    
-    ' Validar que la cantidad sea estrictamente un número
-    If Not IsNumeric(cantidadPiezas) Then
-        MsgBox "Por favor, ingrese un número válido para la cantidad.", vbExclamation, "Error de formato"
-        Exit Sub
-    End If
-    
-    ' 3. Desproteger la hoja temporalmente (Usa la contraseña estándar de tus hojas)
-    ws.Unprotect password:="1234"
-    
-    ' 4. Buscar el siguiente bloque disponible a partir de la fila 37
-    Dim filaDestino As Long
-    filaDestino = 37
-    
-    ' El bucle saltará de 2 en 2 filas hasta encontrar una celda vacía en la columna G
-    Do While ws.Range("G" & filaDestino).Value <> ""
-        filaDestino = filaDestino + 2
-        
-        ' Poka-Yoke: Límite de seguridad por si la tabla se llena (Ej. límite en la fila 97)
-        If filaDestino > 97 Then
-            MsgBox "Se ha alcanzado el límite máximo de entregas en esta tabla.", vbCritical, "Tabla Llena"
-            ws.Protect password:="1234"
-            Exit Sub
-        End If
-    Loop
-    
-    Application.ScreenUpdating = False
-    
-    ' 5. Escribir los datos en el bloque encontrado
-    ' Fila 1 (Nombre)
-    ws.Range("G" & filaDestino).Value = "Op: " & UCase(nombreOperador)
-    ws.Range("G" & filaDestino).Font.Bold = True
-    
-    ' Fila 2 (Fecha y Hora)
-    ws.Range("G" & filaDestino + 1).Value = Format(Now, "dd/mm/yyyy hh:mm")
-    ws.Range("G" & filaDestino + 1).Font.Italic = True
-    
-    ' Celdas Combinadas en H (Cantidad)
-    With ws.Range("H" & filaDestino & ":H" & (filaDestino + 1))
-        .Merge
-        .Value = cantidadPiezas & " Pzs"
-        .Font.Bold = True
-        .Font.Size = 72
-        .HorizontalAlignment = xlCenter
-        .VerticalAlignment = xlCenter
-    End With
-    
-    ' 6. Darle formato de tablita (Bordes) para que se vea profesional
-    With ws.Range("G" & filaDestino & ":H" & (filaDestino + 1))
-        .Borders(xlEdgeLeft).LineStyle = xlContinuous
-        .Borders(xlEdgeTop).LineStyle = xlContinuous
-        .Borders(xlEdgeBottom).LineStyle = xlContinuous
-        .Borders(xlEdgeRight).LineStyle = xlContinuous
-        .Borders(xlInsideHorizontal).LineStyle = xlContinuous
-        .Borders(xlInsideVertical).LineStyle = xlContinuous
-    End With
-    
-    ' 7. Volver a proteger la hoja
-    ws.Protect password:="1234", _
-               DrawingObjects:=True, _
-               Contents:=True, _
-               Scenarios:=True, _
-               UserInterfaceOnly:=False
-               
-    Application.ScreenUpdating = True
-    
-    ' 8. Confirmación y registro en el historial (si aplica)
-    MsgBox "Lote de " & cantidadPiezas & " piezas entregado exitosamente por " & UCase(nombreOperador) & ".", vbInformation, "Entrega Confirmada"
-    
-    ' Opcional: Si tienes tu función AddToHistory activa en este Excel, esto lo registrará en la bitácora oculta
-    On Error Resume Next
-    Call AddToHistory("ENTREGA A EMPAQUE", "Operador " & UCase(nombreOperador) & " entregó un lote de " & cantidadPiezas & " piezas.")
-    On Error GoTo 0
 
+
+#Module6
+
+Sub EntregarLote_Click()
+
+    Dim ws As Worksheet
+
+    Set ws = ActiveSheet
+
+    
+
+    ' 1. Solicitar el nombre del operador
+
+    Dim nombreOperador As String
+
+    nombreOperador = InputBox("Ingrese su nombre (Operador):", "Entrega de Lote a Empaque")
+
+    
+
+    ' Si el usuario cancela o deja en blanco, abortamos
+
+    If Trim(nombreOperador) = "" Then Exit Sub
+
+    
+
+    ' 2. Solicitar la cantidad de piezas
+
+    Dim cantidadPiezas As String
+
+    cantidadPiezas = InputBox("Ingrese la cantidad de piezas a entregar al área de Empaque:", "Cantidad de Piezas")
+
+    
+
+    If Trim(cantidadPiezas) = "" Then Exit Sub
+
+    
+
+    ' Validar que la cantidad sea estrictamente un número
+
+    If Not IsNumeric(cantidadPiezas) Then
+
+        MsgBox "Por favor, ingrese un número válido para la cantidad.", vbExclamation, "Error de formato"
+
+        Exit Sub
+
+    End If
+
+    
+
+    ' 3. Desproteger la hoja temporalmente (Usa la contraseña estándar de tus hojas)
+
+    ws.Unprotect password:="1234"
+
+    
+
+    ' 4. Buscar el siguiente bloque disponible a partir de la fila 37
+
+    Dim filaDestino As Long
+
+    filaDestino = 37
+
+    
+
+    ' El bucle saltará de 2 en 2 filas hasta encontrar una celda vacía en la columna G
+
+    Do While ws.Range("G" & filaDestino).Value <> ""
+
+        filaDestino = filaDestino + 2
+
+        
+
+        ' Poka-Yoke: Límite de seguridad por si la tabla se llena (Ej. límite en la fila 97)
+
+        If filaDestino > 97 Then
+
+            MsgBox "Se ha alcanzado el límite máximo de entregas en esta tabla.", vbCritical, "Tabla Llena"
+
+            ws.Protect password:="1234"
+
+            Exit Sub
+
+        End If
+
+    Loop
+
+    
+
+    Application.ScreenUpdating = False
+
+    
+
+    ' 5. Escribir los datos en el bloque encontrado
+
+    ' Fila 1 (Nombre)
+
+    ws.Range("G" & filaDestino).Value = "Op: " & UCase(nombreOperador)
+
+    ws.Range("G" & filaDestino).Font.Bold = True
+
+    
+
+    ' Fila 2 (Fecha y Hora)
+
+    ws.Range("G" & filaDestino + 1).Value = Format(Now, "dd/mm/yyyy hh:mm")
+
+    ws.Range("G" & filaDestino + 1).Font.Italic = True
+
+    
+
+    ' Celdas Combinadas en H (Cantidad)
+
+    With ws.Range("H" & filaDestino & ":H" & (filaDestino + 1))
+
+        .Merge
+
+        .Value = cantidadPiezas & " Pzs"
+
+        .Font.Bold = True
+
+        .Font.Size = 72
+
+        .HorizontalAlignment = xlCenter
+
+        .VerticalAlignment = xlCenter
+
+    End With
+
+    
+
+    ' 6. Darle formato de tablita (Bordes) para que se vea profesional
+
+    With ws.Range("G" & filaDestino & ":H" & (filaDestino + 1))
+
+        .Borders(xlEdgeLeft).LineStyle = xlContinuous
+
+        .Borders(xlEdgeTop).LineStyle = xlContinuous
+
+        .Borders(xlEdgeBottom).LineStyle = xlContinuous
+
+        .Borders(xlEdgeRight).LineStyle = xlContinuous
+
+        .Borders(xlInsideHorizontal).LineStyle = xlContinuous
+
+        .Borders(xlInsideVertical).LineStyle = xlContinuous
+
+    End With
+
+    
+
+    ' 7. Volver a proteger la hoja
+
+    ws.Protect password:="1234", _
+
+               DrawingObjects:=True, _
+
+               Contents:=True, _
+
+               Scenarios:=True, _
+
+               UserInterfaceOnly:=False
+
+               
+
+    Application.ScreenUpdating = True
+
+    
+
+    ' 8. Confirmación y registro en el historial (si aplica)
+
+    MsgBox "Lote de " & cantidadPiezas & " piezas entregado exitosamente por " & UCase(nombreOperador) & ".", vbInformation, "Entrega Confirmada"
+
+    
+
+    ' Opcional: Si tienes tu función AddToHistory activa en este Excel, esto lo registrará en la bitácora oculta
+
+    On Error Resume Next
+
+    Call AddToHistory("ENTREGA A EMPAQUE", "Operador " & UCase(nombreOperador) & " entregó un lote de " & cantidadPiezas & " piezas.")
+
+    On Error GoTo 0
 End Sub
 
 #Module7
 Sub MostrarTodasLasHojas()
     Dim ws As Worksheet
-    
     ' Recorre todas las hojas del libro
     For Each ws In ThisWorkbook.Worksheets
         ' Cambia el estado a visible
         ws.Visible = xlSheetVisible
     Next ws
-    
     MsgBox "¡Listo! Todas las hojas ahora están visibles.", vbInformation, "Hojas Mostradas"
-End Sub
-
-
-
+End Sub 
 
