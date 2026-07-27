@@ -1,0 +1,53 @@
+#Sheet2 (PLANTILLA)
+Sub Workbook(ByVal Target As Range)
+    Dim ws As Worksheet
+    Set wb = ThisWorkbook
+    Application.EnableEvents = False
+    On Error Resume Next
+
+    ' 1. Fecha y hora fija para números de serie en columna A
+    If Not Intersect(Target, ws.Columns("A")) Is Nothing Then
+        Dim row As Long
+        row = Target.row ' Fila donde ocurre el cambio
+
+        ' Si la celda de la columna A no está vacía, registra la fecha y hora en la columna D
+        If Target.Value <> "" Then
+            If ws.Cells(row, 4).Value = "" Then ' Solo registra si está vacío
+                ws.Cells(row, 4).Value = Format(Now, "dd/mm/yy hh:mm")
+                ws.Cells(row, 4).Locked = True ' Bloquea la celda para evitar cambios manuales
+            End If
+        End If
+    End If
+
+    ' 2. Fecha y hora para "APROBADO" o "RECHAZADO" en H:L filas 2 a 43
+    If Not Intersect(Target, ws.Range("H2:L43")) Is Nothing Then
+        Dim validWords As Variant
+        validWords = Array("APROBADO", "RECHAZADO")
+
+        ' Verificar si el valor ingresado es válido
+        If Not IsError(Application.Match(Target.Value, validWords, 0)) Then
+            ' Registrar fecha y hora en H:L filas 44 y 45
+            ws.Range("H44:L45").Merge
+            ws.Range("H44:L45").Value = Format(Now, "dd/mm/yy hh:mm")
+            ws.Range("H44:L45").HorizontalAlignment = xlCenter ' Centrar el texto
+            ws.Range("H44:L45").VerticalAlignment = xlCenter
+        End If
+    End If
+
+    ' 3. Fecha y hora para "APROBADO" o "RECHAZADO" en M:Q filas 2 a 43
+    If Not Intersect(Target, ws.Range("M2:Q43")) Is Nothing Then
+        Dim validWords2 As Variant
+        validWords2 = Array("APROBADO", "RECHAZADO")
+
+        ' Verificar si el valor ingresado es válido
+        If Not IsError(Application.Match(Target.Value, validWords2, 0)) Then
+            ' Registrar fecha y hora en M:Q filas 44 y 45
+            ws.Range("M44:Q45").Merge
+            ws.Range("M44:Q45").Value = Format(Now, "dd/mm/yy hh:mm")
+            ws.Range("M44:Q45").HorizontalAlignment = xlCenter ' Centrar el texto
+            ws.Range("M44:Q45").VerticalAlignment = xlCenter
+        End If
+    End If
+
+    Application.EnableEvents = True
+End Sub
